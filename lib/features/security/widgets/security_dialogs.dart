@@ -1,33 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/app_snack.dart';
 
-/// 把异常转成可直接展示的文案（[ApiException] 取面板返回的 msg）。
-String errorMessage(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 统一的顶层提示（成功 / 失败）。
-void showSnack(BuildContext context, String message, {bool error = false}) {
-  final theme = Theme.of(context);
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(
-        message,
-        style: TextStyle(
-          color: error ? theme.colorScheme.onErrorContainer : null,
-        ),
-      ),
-      backgroundColor: error ? theme.colorScheme.errorContainer : null,
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: error ? 4 : 2),
-    ),
-  );
-}
+// 提示与异常文案统一走 core：
+// - `showErrorSnack` / `showSuccessSnack` / `showInfoSnack`（core/widgets/app_snack.dart）
+// - `describeError`（core/api/api_exception.dart）
+// 本文件曾自带一份 showSnack / errorMessage，与 core 的实现重复且配色更差，已删除。
 
 /// 通用文本输入对话框，返回用户输入（取消返回 null）。
 Future<String?> showTextInputDialog(
@@ -626,9 +605,7 @@ Future<void> showTextViewDialog(
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: content));
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已复制到剪贴板')),
-                );
+                showSuccessSnack(context, '已复制到剪贴板');
               },
             ),
           FilledButton(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -23,7 +25,24 @@ class _DiskTabState extends ConsumerState<DiskTab> {
   /// 当前正在执行的操作标识（设备名 + 动作），用于禁用按钮并展示进度。
   String? _busy;
 
-  bool get _locked => _busy != null;
+  /// 确认流程（对话框链）是否已经在进行中。
+  ///
+  /// 破坏性操作的对话框是异步弹出的，同一帧内连点两次会叠出两条独立的确认链，
+  /// 用户以为只确认了一次却执行了两次。这里在弹第一个对话框前就先上锁。
+  bool _inFlow = false;
+
+  bool get _locked => _busy != null || _inFlow;
+
+  /// 串行执行一条「对话框确认 → 调接口」的流程，期间禁用本页全部入口。
+  Future<void> _startFlow(Future<void> Function() flow) async {
+    if (_locked) return;
+    setState(() => _inFlow = true);
+    try {
+      await flow();
+    } finally {
+      if (mounted) setState(() => _inFlow = false);
+    }
+  }
 
   Future<void> _run(
     String key,
@@ -38,10 +57,10 @@ class _DiskTabState extends ConsumerState<DiskTab> {
       ref.invalidate(lvmInfoProvider);
       if (refreshFstab) ref.invalidate(fstabProvider);
       if (!mounted) return;
-      showSnack(context, successMessage);
+      showSuccessSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -66,7 +85,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
           : '将 /dev/${part.name} 挂载到 ${params.path}（重启后失效）。',
       confirmText: '挂载',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       '${part.name}:mount',
       () => ref.read(toolboxDiskRepoProvider).mount(
@@ -80,17 +99,23 @@ class _DiskTabState extends ConsumerState<DiskTab> {
     );
   }
 
-  Future<void> _umount(String name, String mountPoint) async {
+  Future<void> _umount(
+    String name,
+    String mountPoint, {
+    bool onSystemDisk = false,
+  }) async {
     final confirmed = await showConfirmDialog(
       context,
       title: '卸载 $mountPoint？',
-      content: '卸载后该挂载点下的数据将不可访问；'
+      content: '${onSystemDisk ? '注意：该挂载点位于系统盘，'
+              '若它是 /boot、/boot/efi 等系统目录，卸载后内核更新等操作会失败。\n\n' : ''}'
+          '卸载后该挂载点下的数据将不可访问；'
           '若有程序正在使用该目录，卸载会失败。'
           '如已写入 fstab，重启后仍会自动挂载。',
       confirmText: '卸载',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       '$name:umount',
       () => ref.read(toolboxDiskRepoProvider).umount(mountPoint),
@@ -98,18 +123,46 @@ class _DiskTabState extends ConsumerState<DiskTab> {
     );
   }
 
-  Future<void> _format(PartitionInfo part) async {
+  /// 格式化分区。
+  ///
+  /// 系统盘上的未挂载分区（EFI 引导分区、`/boot`、BIOS boot 保留分区等）格式化
+  /// 后服务器将无法启动，且只能进控制台救援模式修复。因此在原本的三步确认之前
+  /// **额外插入一步系统盘警示**，并把警示贯穿后续每一步——初始化（整盘）在系统盘
+  /// 上是直接禁用的，分区级不能一刀切禁用（数据分区也可能落在系统盘上），
+  /// 但必须让用户明确知道自己在动系统盘。
+  Future<void> _format(DiskInfo disk, PartitionInfo part) async {
+    final onSystemDisk = part.onSystemDisk;
+    if (onSystemDisk) {
+      final acknowledged = await showConfirmDialog(
+        context,
+        title: '这是系统盘上的分区',
+        content: '/dev/${part.name} 位于系统盘 /dev/${disk.name}。\n\n'
+            '系统盘上未挂载的分区通常是 EFI 引导分区、/boot 或 BIOS boot 保留分区，'
+            '格式化后服务器将无法启动，只能通过服务商控制台进救援模式修复。\n\n'
+            '只有在确认它是一块无用的数据分区时才继续。',
+        confirmText: '我了解风险，继续',
+        cancelText: '返回',
+        danger: true,
+      );
+      if (!acknowledged || !mounted) return;
+    }
+
     final fsType = await showFsTypeDialog(
       context,
-      title: '格式化分区',
+      title: onSystemDisk ? '格式化系统盘上的分区' : '格式化分区',
       target: '/dev/${part.name}　${formatBytes(part.size)}',
-      warning: '格式化会清空该分区上的全部数据，且无法恢复。',
+      warning: onSystemDisk
+          ? '该分区位于系统盘 /dev/${disk.name}。'
+              '格式化会清空分区上的全部数据且无法恢复；'
+              '若它参与系统启动，服务器将无法开机。'
+          : '格式化会清空该分区上的全部数据，且无法恢复。',
     );
     if (fsType == null || !mounted) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '格式化 /dev/${part.name}？',
-      content: '该分区将被重新格式化为 $fsType，'
+      content: '${onSystemDisk ? '该分区在系统盘 /dev/${disk.name} 上。\n\n' : ''}'
+          '该分区将被重新格式化为 $fsType，'
           '分区上的所有文件会被永久删除，操作不可撤销。',
       confirmText: '继续',
       danger: true,
@@ -117,12 +170,15 @@ class _DiskTabState extends ConsumerState<DiskTab> {
     if (!confirmed || !mounted) return;
     final typed = await showTypedConfirmDialog(
       context,
-      title: '最终确认',
-      message: '即将格式化 /dev/${part.name} 为 $fsType，数据无法恢复。',
+      title: onSystemDisk ? '最终确认（系统盘）' : '最终确认',
+      message: onSystemDisk
+          ? '即将格式化系统盘 /dev/${disk.name} 上的 /dev/${part.name} 为 $fsType。'
+              '数据无法恢复，若该分区参与启动，服务器将无法开机。'
+          : '即将格式化 /dev/${part.name} 为 $fsType，数据无法恢复。',
       requiredText: part.name,
       confirmText: '格式化',
     );
-    if (!typed) return;
+    if (!typed || !mounted) return;
     await _run(
       '${part.name}:format',
       () => ref
@@ -154,11 +210,11 @@ class _DiskTabState extends ConsumerState<DiskTab> {
     final typed = await showTypedConfirmDialog(
       context,
       title: '最终确认',
-      message: '即将清空 /dev/${disk.name} 并格式化为 $fsType，数据无法恢复。',
+      message: '即将清空整块磁盘 /dev/${disk.name} 并格式化为 $fsType，数据无法恢复。',
       requiredText: disk.name,
       confirmText: '初始化',
     );
-    if (!typed) return;
+    if (!typed || !mounted) return;
     await _run(
       '${disk.name}:init',
       () => ref
@@ -181,7 +237,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
       );
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -251,6 +307,8 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                     Text(
                       '${formatBytes(disk.size)} · ${disk.modelLabel} · '
                       '${disk.partitions.length} 个分区',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -263,6 +321,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                   padding: const EdgeInsets.only(left: 6),
                   child: TagChip(
                     label: '系统盘',
+                    icon: Icons.warning_amber_rounded,
                     color: theme.colorScheme.error,
                   ),
                 ),
@@ -280,7 +339,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                           case 'detail':
                             _showPartitions(disk);
                           case 'init':
-                            _init(disk);
+                            _startFlow(() => _init(disk));
                         }
                       },
                       itemBuilder: (context) => [
@@ -323,7 +382,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
           if (disk.partitions.isEmpty)
             _wholeDiskRow(disk, usage)
           else
-            for (final part in disk.partitions) _partitionRow(part),
+            for (final part in disk.partitions) _partitionRow(disk, part),
         ],
       ),
     );
@@ -366,8 +425,15 @@ class _DiskTabState extends ConsumerState<DiskTab> {
               const BusyIndicator()
             else if (disk.mountpoint != '/')
               TextButton(
-                onPressed:
-                    _locked ? null : () => _umount(disk.name, disk.mountpoint),
+                onPressed: _locked
+                    ? null
+                    : () => _startFlow(
+                          () => _umount(
+                            disk.name,
+                            disk.mountpoint,
+                            onSystemDisk: disk.isSystemDisk,
+                          ),
+                        ),
                 child: const Text('卸载'),
               ),
           ],
@@ -392,7 +458,7 @@ class _DiskTabState extends ConsumerState<DiskTab> {
     );
   }
 
-  Widget _partitionRow(PartitionInfo part) {
+  Widget _partitionRow(DiskInfo disk, PartitionInfo part) {
     final theme = Theme.of(context);
     final busy = _isBusy('${part.name}:mount') ||
         _isBusy('${part.name}:umount') ||
@@ -451,6 +517,8 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                         if (part.fstype.isNotEmpty) part.fstype,
                         part.mounted ? part.mountpoint : '未挂载',
                       ].join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -470,11 +538,17 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                   onSelected: (value) {
                     switch (value) {
                       case 'mount':
-                        _mount(part);
+                        _startFlow(() => _mount(part));
                       case 'umount':
-                        _umount(part.name, part.mountpoint);
+                        _startFlow(
+                          () => _umount(
+                            part.name,
+                            part.mountpoint,
+                            onSystemDisk: part.onSystemDisk,
+                          ),
+                        );
                       case 'format':
-                        _format(part);
+                        _startFlow(() => _format(disk, part));
                     }
                   },
                   itemBuilder: (context) => [
@@ -499,6 +573,8 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                           title: Text(part.isRoot ? '卸载（根分区禁止）' : '卸载'),
                         ),
                       ),
+                    // 格式化只对未挂载分区开放；位于系统盘时额外标注，
+                    // 点开后会先弹一层「这是系统盘上的分区」警示。
                     if (!part.mounted)
                       PopupMenuItem<String>(
                         value: 'format',
@@ -510,9 +586,17 @@ class _DiskTabState extends ConsumerState<DiskTab> {
                             color: theme.colorScheme.error,
                           ),
                           title: Text(
-                            '格式化',
+                            part.onSystemDisk ? '格式化（系统盘分区）' : '格式化',
                             style: TextStyle(color: theme.colorScheme.error),
                           ),
+                          subtitle: part.onSystemDisk
+                              ? Text(
+                                  '可能是引导分区，格式化后无法开机',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.error,
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
                   ],

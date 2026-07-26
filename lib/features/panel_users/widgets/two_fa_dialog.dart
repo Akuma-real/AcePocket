@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/two_fa_setup.dart';
 import '../providers/panel_user_providers.dart';
-import 'panel_user_dialogs.dart';
 
 /// 开启两步验证对话框。
 ///
@@ -106,7 +108,7 @@ class _EnableTwoFaDialogState extends ConsumerState<_EnableTwoFaDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _codeError = errorMessage(e);
+        _codeError = describeError(e);
       });
     }
   }
@@ -148,8 +150,9 @@ class _EnableTwoFaDialogState extends ConsumerState<_EnableTwoFaDialog> {
     }
     final error = _loadError;
     if (error != null) {
-      return SizedBox(
-        height: 220,
+      // 不能固定高度：ErrorView 本身就要 200dp 以上，错误文案再长一点
+      // 「重试」按钮就会被挤出可见区域。改为按内容撑开并允许滚动。
+      return SingleChildScrollView(
         child: ErrorView(error: error, onRetry: _load),
       );
     }
@@ -185,10 +188,18 @@ class _EnableTwoFaDialogState extends ConsumerState<_EnableTwoFaDialog> {
                   height: 168,
                   fit: BoxFit.contain,
                   filterQuality: FilterQuality.none,
+                  // 占位文字要显式取深色：外层是固定白底，深色主题下继承来的
+                  // 浅色前景会变成白底白字。
                   errorBuilder: (context, error, stackTrace) => const SizedBox(
                     width: 168,
                     height: 168,
-                    child: Center(child: Text('二维码加载失败')),
+                    child: Center(
+                      child: Text(
+                        '二维码加载失败\n可改用下方密钥手动录入',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.black87),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -272,12 +283,12 @@ class _SecretRow extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            tooltip: '复制',
+          A11yIconButton(
+            tooltip: '复制$label',
             icon: const Icon(Icons.copy_rounded, size: 18),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: value));
-              if (context.mounted) showSnack(context, '$label已复制');
+              if (context.mounted) showSuccessSnack(context, '$label已复制');
             },
           ),
         ],

@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -82,16 +84,23 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
   // 通用工具
   // ---------------------------------------------------------------------------
 
-  void _snack(String message, {bool error = false}) {
+  /// 错误提示：统一走 core 的 [showErrorSnack]（errorContainer / onErrorContainer
+  /// 成对配色，深浅主题下都能看清；旧实现只改背景色，对比度约 1.1:1）。
+  void _error(Object error) {
     if (!mounted) return;
-    final theme = Theme.of(context);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: error ? theme.colorScheme.errorContainer : null,
-        showCloseIcon: error,
-      ));
+    showErrorSnack(context, error);
+  }
+
+  /// 操作成功提示。
+  void _success(String message) {
+    if (!mounted) return;
+    showSuccessSnack(context, message);
+  }
+
+  /// 中性信息提示（既非成功也非失败，如「已取消」「已跳过」）。
+  void _info(String message) {
+    if (!mounted) return;
+    showInfoSnack(context, message);
   }
 
   /// 面板后台任务已提交的提示（带「查看任务」跳转 `/tasks`）。
@@ -118,7 +127,11 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     String? success,
     bool task = false,
   }) async {
-    if (_busy) return;
+    if (_busy) {
+      // 有操作在途时静默丢弃会让用户以为「点了没反应」，明确告知。
+      _info('已有操作正在执行，请稍候');
+      return;
+    }
     setState(() => _busy = true);
     try {
       final done = await action();
@@ -126,11 +139,11 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
         if (task) {
           _taskSnack(success);
         } else {
-          _snack(success);
+          _success(success);
         }
       }
     } catch (e) {
-      _snack(describeError(e), error: true);
+      _error(e);
     } finally {
       // 无论成功还是部分失败都刷新列表，保证展示与服务端一致。
       if (mounted) {
@@ -256,7 +269,8 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           failures.add('${posixBaseName(path)}：${e.message}');
         }
       }
-      setState(_selected.clear);
+      // 循环里有 await，回到这里页面可能已销毁，setState 会抛异常。
+      if (mounted) setState(_selected.clear);
       if (failures.isNotEmpty) {
         throw ApiException('部分项目删除失败：\n${failures.join('\n')}');
       }
@@ -283,7 +297,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     if (paths.isEmpty) return;
     ref.read(fileClipboardProvider.notifier).set(paths, isMove: isMove);
     setState(_selected.clear);
-    _snack(isMove ? '已剪切 ${paths.length} 项，请到目标目录粘贴' : '已复制 ${paths.length} 项，请到目标目录粘贴');
+    _info(isMove
+        ? '已剪切 ${paths.length} 项，进入目标目录后点顶部的「粘贴到此」'
+        : '已复制 ${paths.length} 项，进入目标目录后点顶部的「粘贴到此」');
   }
 
   Future<void> _paste() async {
@@ -293,7 +309,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     // 此处防御性拦截，避免把其他服务器的路径下发给当前服务器执行）。
     if (clip.serverId != ref.read(activeServerProvider)?.id) {
       ref.read(fileClipboardProvider.notifier).clear();
-      _snack('剪贴板中的文件来自其他服务器，已清空，请重新复制', error: true);
+      _error(const ApiException('剪贴板中的文件来自其他服务器，已清空，请重新复制'));
       return;
     }
     final targets = <FileTransferItem>[];
@@ -379,7 +395,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           failures.add('${posixBaseName(path)}：${e.message}');
         }
       }
-      setState(_selected.clear);
+      if (mounted) setState(_selected.clear);
       if (failures.isNotEmpty) {
         throw ApiException('部分项目设置失败：\n${failures.join('\n')}');
       }
@@ -391,7 +407,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     if (paths.isEmpty) return;
     final dir = posixParent(paths.first);
     if (paths.any((p) => posixParent(p) != dir)) {
-      _snack('所选项目不在同一目录，无法一起压缩', error: true);
+      _error(const ApiException('所选项目不在同一目录，无法一起压缩'));
       return;
     }
     final names = paths.map(posixBaseName).toList();
@@ -401,7 +417,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       await ref
           .read(fileRepoProvider)
           .compress(dir: dir, paths: names, file: dest);
-      setState(_selected.clear);
+      if (mounted) setState(_selected.clear);
       return true;
     }, success: '压缩任务已创建', task: true);
   }
@@ -488,7 +504,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
         withReadStream: false,
       );
     } catch (e) {
-      _snack('打开文件选择器失败：${describeError(e)}', error: true);
+      _error(ApiException('打开文件选择器失败：${describeError(e)}'));
       return;
     }
     if (picked == null || picked.files.isEmpty || !mounted) return;
@@ -512,7 +528,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       }
     }
     if (sources.isEmpty) {
-      _snack('没有可读取的文件，请重新选择', error: true);
+      _error(const ApiException('选中的文件都无法读取，请重新选择'));
       return;
     }
 
@@ -586,12 +602,12 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       }
     } catch (e) {
       await closeAll();
-      _snack(describeError(e), error: true);
+      _error(e);
       return;
     }
 
     if (jobs.isEmpty) {
-      _snack('已跳过全部文件，未执行上传');
+      _info('已跳过全部同名文件，未执行上传');
       return;
     }
     if (!mounted) {
@@ -616,10 +632,15 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       messages.add('${unreadable.length} 个文件无法读取');
     }
     if (outcome.failures.isNotEmpty) {
-      _snack('上传结束：${messages.join('，')}\n${outcome.failures.join('\n')}',
-          error: true);
+      _error(ApiException(
+          '上传结束：${messages.join('，')}\n${outcome.failures.join('\n')}'));
+    } else if (messages.isEmpty) {
+      _info('未上传任何文件');
+    } else if (outcome.cancelled || unreadable.isNotEmpty) {
+      // 有取消或跳过时不算「完成」，用中性提示避免误导。
+      _info('上传结束：${messages.join('，')}');
     } else {
-      _snack(messages.isEmpty ? '未上传任何文件' : '上传完成：${messages.join('，')}');
+      _success('上传完成：${messages.join('，')}');
     }
   }
 
@@ -652,7 +673,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
   /// 下载服务器文件到手机本地，并提供「用其他应用打开」。
   Future<void> _downloadToPhone(FileItem item) async {
     if (item.dir) {
-      _snack('目录无法直接下载，请先压缩为压缩包', error: true);
+      _error(const ApiException('目录无法直接下载，请先压缩为压缩包再下载'));
       return;
     }
     final repo = ref.read(fileRepoProvider);
@@ -673,12 +694,12 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     );
     if (!mounted || outcome == null) return;
     if (outcome.cancelled) {
-      _snack('下载已取消');
+      _info('下载已取消');
       return;
     }
     final error = outcome.error;
     if (error != null) {
-      _snack(error, error: true);
+      _error(ApiException(error));
       return;
     }
     final file = outcome.file;
@@ -764,7 +785,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
 
   Future<void> _copyPath(String path) async {
     await Clipboard.setData(ClipboardData(text: path));
-    _snack('路径已复制到剪贴板');
+    _success('路径已复制到剪贴板');
   }
 
   Future<void> _handleAction(FileItem item) async {
@@ -853,37 +874,37 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
   // UI
   // ---------------------------------------------------------------------------
 
-  PreferredSizeWidget _buildAppBar(int visibleCount) {
+  PreferredSizeWidget _buildAppBar(int visibleCount, String countLabel) {
     final sort = ref.watch(fileSortProvider);
     final showHidden = ref.watch(showHiddenFilesProvider);
 
     if (_selected.isNotEmpty) {
       return AppBar(
-        leading: IconButton(
+        leading: A11yIconButton(
           icon: const Icon(Icons.close),
-          tooltip: '取消选择',
+          tooltip: '退出多选',
           onPressed: () => setState(_selected.clear),
         ),
         title: Text('已选择 ${_selected.length} 项'),
         actions: [
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.copy_outlined),
-            tooltip: '复制',
+            tooltip: '复制选中项',
             onPressed: () =>
                 _copyToClipboard(_selected.toList(), isMove: false),
           ),
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.content_cut),
-            tooltip: '剪切',
+            tooltip: '剪切选中项',
             onPressed: () => _copyToClipboard(_selected.toList(), isMove: true),
           ),
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: '删除',
-            onPressed: () => _delete(_selected.toList()),
+            tooltip: '删除选中项',
+            onPressed: _busy ? null : () => _delete(_selected.toList()),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '更多批量操作',
             onSelected: (value) async {
               switch (value) {
                 case 'all':
@@ -911,8 +932,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
 
     if (_searching) {
       return AppBar(
-        leading: IconButton(
+        leading: A11yIconButton(
           icon: const Icon(Icons.arrow_back),
+          tooltip: '退出搜索',
           onPressed: () => setState(() {
             _searching = false;
             _keyword = '';
@@ -930,9 +952,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           onSubmitted: (value) => setState(() => _keyword = value.trim()),
         ),
         actions: [
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.search),
-            tooltip: '搜索',
+            tooltip: '开始搜索',
             onPressed: () =>
                 setState(() => _keyword = _searchController.text.trim()),
           ),
@@ -941,9 +963,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     }
 
     return AppBar(
-      leading: IconButton(
+      leading: A11yIconButton(
         icon: const Icon(Icons.arrow_back),
-        tooltip: '返回',
+        tooltip: '返回上一级',
         onPressed: () {
           if (_goBack()) return;
           if (context.canPop()) {
@@ -964,7 +986,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
             overflow: TextOverflow.ellipsis,
           ),
           Text(
-            '$visibleCount 项',
+            countLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -972,14 +996,14 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
         ],
       ),
       actions: [
-        IconButton(
+        A11yIconButton(
           icon: const Icon(Icons.search),
-          tooltip: '搜索',
+          tooltip: '搜索文件',
           onPressed: () => setState(() => _searching = true),
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.sort),
-          tooltip: '排序',
+          tooltip: '排序方式',
           onSelected: (value) =>
               ref.read(fileSortProvider.notifier).set(value),
           itemBuilder: (context) => [
@@ -1000,7 +1024,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           ],
         ),
         PopupMenuButton<String>(
-          tooltip: '更多',
+          tooltip: '更多操作',
           onSelected: (value) async {
             switch (value) {
               case 'hidden':
@@ -1068,6 +1092,8 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
             Expanded(
               child: Text(
                 '${clip.isMove ? '待移动' : '待复制'} ${clip.paths.length} 项',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSecondaryContainer,
                 ),
@@ -1077,9 +1103,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
               onPressed: _busy ? null : _paste,
               child: const Text('粘贴到此'),
             ),
-            IconButton(
+            A11yIconButton(
               iconSize: 18,
-              tooltip: '取消',
+              tooltip: '清空剪贴板',
               icon: const Icon(Icons.close),
               onPressed: () =>
                   ref.read(fileClipboardProvider.notifier).clear(),
@@ -1106,16 +1132,25 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
               height: 320,
               child: EmptyView(
                 message: _keyword.isEmpty
-                    ? '该目录为空'
-                    : '没有匹配「$_keyword」的文件',
+                    ? '该目录为空\n可以点下方按钮新建文件、文件夹或上传文件'
+                    : '在 $_path 及其子目录中没有找到匹配「$_keyword」的文件\n'
+                        '可换个关键字，或清除搜索回到目录浏览',
                 icon: Icons.folder_off_outlined,
                 action: _keyword.isEmpty
                     ? FilledButton.tonalIcon(
-                        onPressed: _showCreateSheet,
+                        onPressed: _busy ? null : _showCreateSheet,
                         icon: const Icon(Icons.add),
-                        label: const Text('新建'),
+                        label: const Text('新建或上传'),
                       )
-                    : null,
+                    : FilledButton.tonalIcon(
+                        onPressed: () => setState(() {
+                          _keyword = '';
+                          _searching = false;
+                          _searchController.clear();
+                        }),
+                        icon: const Icon(Icons.search_off),
+                        label: const Text('清除搜索'),
+                      ),
               ),
             ),
           ],
@@ -1147,8 +1182,11 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
                 child: Column(
                   children: [
                     Text(
-                      '加载失败：$loadMoreError',
+                      // describeError：直接插值会露出原始英文异常类型。
+                      '加载下一页失败：${describeError(loadMoreError)}',
                       textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: theme.colorScheme.error),
                     ),
@@ -1238,9 +1276,18 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       sort: ref.watch(fileSortProvider),
     );
     final listAsync = ref.watch(fileListProvider(query));
-    final visibleCount = listAsync.valueOrNull == null
-        ? 0
-        : _visibleItems(listAsync.valueOrNull!.items).length;
+    final listState = listAsync.valueOrNull;
+    final visibleCount =
+        listState == null ? 0 : _visibleItems(listState.items).length;
+    // 首次加载 / 出错时不要显示「0 项」，那会被误读为「目录是空的」。
+    final String countLabel;
+    if (listState == null) {
+      countLabel = listAsync.hasError ? '读取失败' : '正在读取…';
+    } else if (_keyword.isNotEmpty) {
+      countLabel = '搜索到 $visibleCount 项';
+    } else {
+      countLabel = '$visibleCount 项';
+    }
 
     return PopScope(
       canPop: _selected.isEmpty &&
@@ -1252,11 +1299,11 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
         _goBack();
       },
       child: Scaffold(
-        appBar: _buildAppBar(visibleCount),
+        appBar: _buildAppBar(visibleCount, countLabel),
         floatingActionButton: _selected.isEmpty && !_searching
             ? FloatingActionButton(
                 onPressed: _busy ? null : _showCreateSheet,
-                tooltip: '新建',
+                tooltip: '新建文件、文件夹或上传',
                 child: const Icon(Icons.add),
               )
             : null,

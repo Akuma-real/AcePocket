@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'formatters.dart';
+
 /// 「标签 — 值」信息行，用于系统信息等纵向罗列的键值对。
 class InfoRow extends StatelessWidget {
   const InfoRow({
@@ -87,6 +89,8 @@ class MetricTile extends StatelessWidget {
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
               color: theme.colorScheme.onSurface,
+              // 首页的负载 / 计数每 3 秒刷新一次，等宽数字避免整行左右抖动。
+              fontFeatures: kTabularFigures,
             ),
           ),
           const SizedBox(height: 2),
@@ -128,10 +132,13 @@ class UsageBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final ratio = (percent / 100).clamp(0.0, 1.0);
-    final color = percent >= 90
+    // 面板偶尔会返回 NaN / Infinity（分母为 0 的采样窗口）。NaN 通不过 clamp，
+    // 会直接把 LinearProgressIndicator 的断言打挂，这里先归零。
+    final safePercent = percent.isFinite ? percent : 0.0;
+    final ratio = (safePercent / 100).clamp(0.0, 1.0);
+    final color = safePercent >= 90
         ? theme.colorScheme.error
-        : percent >= 75
+        : safePercent >= 75
             ? theme.colorScheme.tertiary
             : theme.colorScheme.primary;
     return Padding(
@@ -151,10 +158,11 @@ class UsageBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                '${percent.toStringAsFixed(1)}%',
+                '${safePercent.toStringAsFixed(1)}%',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w600,
+                  fontFeatures: kTabularFigures,
                 ),
               ),
             ],

@@ -4,13 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../models/webhook.dart';
 import '../providers/notify_alert_providers.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/paged_list_view.dart';
-import '../widgets/snack.dart';
 import '../widgets/webhook_tile.dart';
 
 /// WebHook 列表页 `/webhooks`。
@@ -32,7 +33,9 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
     }
   }
 
+  /// 操作期间禁用其他条目的操作，避免重复提交。
   Future<void> _runBusy(int id, Future<void> Function() action) async {
+    if (_busyId != null) return;
     setState(() => _busyId = id);
     try {
       await action();
@@ -44,14 +47,14 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
   }
 
   Future<void> _create() async {
-    await context.push('/webhooks/new');
-    if (!mounted) return;
+    final saved = await context.push<bool>('/webhooks/new');
+    if (!mounted || saved != true) return;
     await _reloadQuietly();
   }
 
   Future<void> _edit(WebHook webhook) async {
-    await context.push('/webhooks/${webhook.id}/edit');
-    if (!mounted) return;
+    final saved = await context.push<bool>('/webhooks/${webhook.id}/edit');
+    if (!mounted || saved != true) return;
     await _reloadQuietly();
   }
 
@@ -61,7 +64,8 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
           .read(notifyAlertRepoProvider)
           .updateWebhook(webhook.copyWith(status: !webhook.status));
       if (mounted) {
-        showSnack(context, webhook.status ? 'WebHook 已停用' : 'WebHook 已启用');
+        showSuccessSnack(
+            context, webhook.status ? 'WebHook 已停用' : 'WebHook 已启用');
       }
       await _reloadQuietly();
     });
@@ -69,7 +73,7 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
 
   Future<void> _copyUrl(String url) async {
     await Clipboard.setData(ClipboardData(text: url));
-    if (mounted) showSnack(context, '回调地址已复制');
+    if (mounted) showSuccessSnack(context, '回调地址已复制到剪贴板');
   }
 
   Future<void> _delete(WebHook webhook) async {
@@ -84,17 +88,9 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
     if (!ok) return;
     await _runBusy(webhook.id, () async {
       await ref.read(notifyAlertRepoProvider).deleteWebhook(webhook.id);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, 'WebHook 已删除');
       await _reloadQuietly();
     });
-  }
-
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(webhooksProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
   }
 
   @override
@@ -106,8 +102,8 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
       appBar: AppBar(
         title: const Text('WebHook'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新 WebHook 列表',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(webhooksProvider),
           ),
@@ -124,7 +120,7 @@ class _WebhookPageState extends ConsumerState<WebhookPage> {
                     '执行脚本。地址中的 Key 等同于凭据，请妥善保管。',
               ),
               onRefresh: () => ref.read(webhooksProvider.notifier).refresh(),
-              onLoadMore: _loadMore,
+              onLoadMore: () => ref.read(webhooksProvider.notifier).loadMore(),
               onRetry: () => ref.invalidate(webhooksProvider),
               emptyMessage: '暂无 WebHook',
               emptyIcon: Icons.webhook_outlined,

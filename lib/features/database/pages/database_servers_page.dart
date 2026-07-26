@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/database_server.dart';
 import '../models/db_types.dart';
@@ -25,6 +26,10 @@ class DatabaseServersPage extends ConsumerStatefulWidget {
 
 class _DatabaseServersPageState extends ConsumerState<DatabaseServersPage> {
   String _type = '';
+
+  /// 正在同步用户的服务器 id：同步是耗时操作且无进度反馈，
+  /// 不拦住重复点击会向面板发多份同样的导入请求。
+  final Set<int> _syncing = <int>{};
 
   DatabaseServerListNotifier get _notifier =>
       ref.read(databaseServerListProvider(_type).notifier);
@@ -67,6 +72,10 @@ class _DatabaseServersPageState extends ConsumerState<DatabaseServersPage> {
   }
 
   Future<void> _sync(DatabaseServer server) async {
+    if (_syncing.contains(server.id)) {
+      showInfoSnack(context, '「${server.name}」正在同步用户，请稍候');
+      return;
+    }
     final ok = await showConfirmDialog(
       context,
       title: '同步服务器用户',
@@ -75,12 +84,15 @@ class _DatabaseServersPageState extends ConsumerState<DatabaseServersPage> {
     );
     if (!ok || !mounted) return;
 
-    showMessage(context, '正在同步用户，请稍候…');
+    showInfoSnack(context, '正在同步用户，请稍候…');
+    setState(() => _syncing.add(server.id));
     final success = await runGuarded(
       context,
       () => ref.read(databaseRepoProvider).syncServer(server.id),
       success: '用户同步完成',
     );
+    if (!mounted) return;
+    setState(() => _syncing.remove(server.id));
     if (success) {
       ref.invalidate(databaseUserListProvider);
       await _refresh();
@@ -151,6 +163,7 @@ class _DatabaseServersPageState extends ConsumerState<DatabaseServersPage> {
               ),
               itemBuilder: (context, server, index) => DatabaseServerTile(
                 server: server,
+                syncing: _syncing.contains(server.id),
                 onEdit: () => _edit(server),
                 onEditRemark: () => _editRemark(server),
                 onSync: () => _sync(server),

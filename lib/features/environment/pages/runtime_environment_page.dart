@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../core/widgets/task_snack.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/environment_models.dart';
 import '../providers/environment_providers.dart';
 import '../widgets/environment_ui.dart';
@@ -69,11 +73,11 @@ class _RuntimeEnvironmentPageState
       if (asTask) {
         showTaskSubmittedSnack(context, successMessage);
       } else {
-        showEnvSnack(context, successMessage);
+        showSuccessSnack(context, successMessage);
       }
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -101,8 +105,8 @@ class _RuntimeEnvironmentPageState
       appBar: AppBar(
         title: Text('$typeLabel ${widget.slug}'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新环境信息',
             icon: const Icon(Icons.refresh),
             onPressed: _refreshAll,
           ),
@@ -120,19 +124,25 @@ class _RuntimeEnvironmentPageState
             _refreshAll();
             await ref.read(environmentDetailProvider(_ref).future);
           },
-          child: ListView(
+          // 用 SingleChildScrollView 而不是 ListView：全页只有三四张卡片，
+          // 而 ListView 会把滚出视口的卡片连同 State 一起销毁——代理 / 镜像源
+          // 编辑器的草稿和它内部的返回拦截都会随之丢失。
+          child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(top: 8, bottom: 32),
-            children: [
-              if (env == null)
-                const HintBanner(
-                  '面板环境列表中未找到该版本，可能是环境源数据已更新。',
-                  warning: true,
-                ),
-              _infoCard(env),
-              _cliCard(env),
-              ..._extraCards(env),
-            ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (env == null)
+                  const HintBanner(
+                    '面板环境列表中未找到该版本，可能是环境源数据已更新。',
+                    warning: true,
+                  ),
+                _infoCard(env),
+                _cliCard(env),
+                ..._extraCards(env),
+              ],
+            ),
           ),
         ),
       ),
@@ -156,12 +166,15 @@ class _RuntimeEnvironmentPageState
   }
 
   Future<void> _onMenu(String value, EnvironmentDetail? env) async {
+    // 安装 / 更新 / 卸载在途时不再受理新的菜单操作：菜单项本身不会置灰，
+    // 连点会给面板连发多条同类后台任务。
+    if (_busy != null) return;
     final repo = ref.read(environmentRepoProvider);
     final name = env?.name ?? '${environmentTypeLabel(widget.type)} ${widget.slug}';
     switch (value) {
       case 'check':
         ref.invalidate(environmentInstalledProvider(_ref));
-        showEnvSnack(context, '正在重新检测…');
+        showInfoSnack(context, '正在重新检测安装状态…');
       case 'install':
         final ok = await showConfirmDialog(
           context,
@@ -345,7 +358,10 @@ class _RuntimeEnvironmentPageState
         case 'dotnet':
           return repo.dotnetSetCli(widget.slug);
         default:
-          throw StateError('不支持的环境类型：${widget.type}');
+          // 面板 /environment/types 只会返回 go/java/nodejs/python/dotnet/php，
+          // 走到这里说明面板新增了本端未适配的类型，给出可读提示而非 StateError
+          // （StateError 的 toString 会带上英文的 "Bad state: " 前缀）。
+          throw ApiException('暂不支持为 ${widget.type} 类型设置命令行默认版本');
       }
     }
 
@@ -470,6 +486,7 @@ class _RuntimeEnvironmentPageState
         error: (error, _) => ErrorView(error: error, onRetry: onRetry),
         data: (current) => _SourceEditor(
           key: ValueKey('$title:$current'),
+          title: title,
           initialValue: current,
           helper: helper,
           presets: presets,
@@ -485,12 +502,16 @@ class _RuntimeEnvironmentPageState
 class _SourceEditor extends StatefulWidget {
   const _SourceEditor({
     super.key,
+    required this.title,
     required this.initialValue,
     required this.helper,
     required this.presets,
     required this.saving,
     required this.onSave,
   });
+
+  /// 所属卡片标题，用于返回确认的文案。
+  final String title;
 
   final String initialValue;
   final String helper;
@@ -506,83 +527,124 @@ class _SourceEditorState extends State<_SourceEditor> {
   late final TextEditingController _controller =
       TextEditingController(text: widget.initialValue);
 
+  /// 输入框内容是否偏离服务端当前值。
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_syncDirty);
+  }
+
   @override
   void dispose() {
-    _controller.dispose();
+    _controller
+      ..removeListener(_syncDirty)
+      ..dispose();
     super.dispose();
+  }
+
+  void _syncDirty() {
+    final dirty = _controller.text.trim() != widget.initialValue.trim();
+    if (dirty != _dirty) setState(() => _dirty = dirty);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          widget.helper,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+    // 拦截返回：改了代理 / 镜像源却没点保存时先确认。
+    // UnsavedChangesGuard 内部的 PopScope 按最近的 ModalRoute 注册，不必包住
+    // 整个 Scaffold；就近包裹编辑器可以让脏状态完全留在组件内，无需上抛页面级。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '${widget.title}有未保存的修改，确定放弃吗？',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            widget.helper,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _controller,
-          maxLines: 2,
-          minLines: 1,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            maxLines: 2,
+            minLines: 1,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final preset in widget.presets)
-              ActionChip(
-                label: Text(
-                  preset,
-                  style: const TextStyle(fontSize: 11),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final preset in widget.presets)
+                ActionChip(
+                  label: Text(
+                    preset,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  onPressed: widget.saving
+                      ? null
+                      : () => _controller.text = preset,
                 ),
-                onPressed: () => setState(() => _controller.text = preset),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (_dirty)
+                Expanded(
+                  child: Text(
+                    '有未保存的修改',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.tertiary),
+                  ),
+                )
+              else
+                const Spacer(),
+              TextButton(
+                onPressed: widget.saving
+                    ? null
+                    : () => copyToClipboard(context, _controller.text),
+                child: const Text('复制'),
               ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(
-              onPressed: widget.saving
-                  ? null
-                  : () => copyToClipboard(context, _controller.text),
-              child: const Text('复制'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: widget.saving
-                  ? null
-                  : () {
-                      final value = _controller.text.trim();
-                      if (value.isEmpty) {
-                        showEnvSnack(context, '内容不能为空', error: true);
-                        return;
-                      }
-                      widget.onSave(value);
-                    },
-              child: widget.saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('保存'),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: widget.saving
+                    ? null
+                    : () {
+                        final value = _controller.text.trim();
+                        if (value.isEmpty) {
+                          showErrorSnack(
+                            context,
+                            const ApiException('内容不能为空'),
+                          );
+                          return;
+                        }
+                        widget.onSave(value);
+                      },
+                child: widget.saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('保存'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

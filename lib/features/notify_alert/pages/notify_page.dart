@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/notify_channel.dart';
 import '../models/notify_setting.dart';
 import '../providers/notify_alert_providers.dart';
@@ -15,7 +18,6 @@ import '../widgets/channel_selector.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/notify_channel_tile.dart';
 import '../widgets/paged_list_view.dart';
-import '../widgets/snack.dart';
 
 /// 通知页 `/notify`：通知渠道管理与系统事件通知设置。
 class NotifyPage extends ConsumerStatefulWidget {
@@ -48,15 +50,29 @@ class _NotifyPageState extends ConsumerState<NotifyPage>
     if (mounted) setState(() {});
   }
 
-  void _refreshAll() {
+  /// 刷新两个 Tab 的数据。事件通知有未保存草稿时先确认——刷新会用服务端
+  /// 数据覆盖草稿。
+  Future<void> _refreshAll() async {
+    if (ref.read(notifyEventDirtyProvider)) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '放弃未保存的修改',
+        content: '「事件通知」有未保存的修改，刷新会用服务器上的设置覆盖它们。确定继续？',
+        confirmText: '刷新',
+        cancelText: '继续编辑',
+        danger: true,
+      );
+      if (!ok || !mounted) return;
+      ref.read(notifyEventDraftProvider.notifier).clear();
+    }
     ref.invalidate(notifyChannelsProvider);
     ref.invalidate(allNotifyChannelsProvider);
     ref.invalidate(notifySettingProvider);
   }
 
   Future<void> _createChannel() async {
-    await context.push('/notify/channels/new');
-    if (!mounted) return;
+    final saved = await context.push<bool>('/notify/channels/new');
+    if (!mounted || saved != true) return;
     ref.invalidate(allNotifyChannelsProvider);
     try {
       await ref.read(notifyChannelsProvider.notifier).reload();
@@ -67,45 +83,85 @@ class _NotifyPageState extends ConsumerState<NotifyPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('通知'),
-        actions: [
-          IconButton(
-            tooltip: '刷新',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshAll,
+    final dirty = ref.watch(notifyEventDirtyProvider);
+
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: dirty,
+      message: '「事件通知」有未保存的修改，返回后将丢弃。确定放弃吗？',
+      onDiscard: () => ref.read(notifyEventDraftProvider.notifier).clear(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('通知'),
+          actions: [
+            A11yIconButton(
+              tooltip: '刷新通知渠道与事件设置',
+              icon: const Icon(Icons.refresh),
+              onPressed: _refreshAll,
+            ),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: [
+              const Tab(text: '通知渠道'),
+              Tab(
+                child: Semantics(
+                  label: dirty ? '事件通知，有未保存的修改' : '事件通知',
+                  // 标签已包含文字内容，排除子节点语义避免读屏重复播报。
+                  excludeSemantics: true,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('事件通知'),
+                      if (dirty) ...[
+                        const SizedBox(width: 6),
+                        const _UnsavedDot(),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '通知渠道'),
-            Tab(text: '事件通知'),
+        ),
+        body: Column(
+          children: [
+            const FeatureUnsupportedBanner(feature: PanelFeature.notify),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: const [
+                  _ChannelsTab(),
+                  _EventSettingTab(),
+                ],
+              ),
+            ),
           ],
         ),
+        floatingActionButton: _tabController.index == 0
+            ? FloatingActionButton.extended(
+                onPressed: _createChannel,
+                icon: const Icon(Icons.add),
+                label: const Text('新建渠道'),
+              )
+            : null,
       ),
-      body: Column(
-        children: [
-          const FeatureUnsupportedBanner(feature: PanelFeature.notify),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: const [
-                _ChannelsTab(),
-                _EventSettingTab(),
-              ],
-            ),
-          ),
-        ],
+    );
+  }
+}
+
+/// Tab 标题上的「有未保存修改」小圆点。
+class _UnsavedDot extends StatelessWidget {
+  const _UnsavedDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        shape: BoxShape.circle,
       ),
-      floatingActionButton: _tabController.index == 0
-          ? FloatingActionButton.extended(
-              onPressed: _createChannel,
-              icon: const Icon(Icons.add),
-              label: const Text('新建渠道'),
-            )
-          : null,
     );
   }
 }
@@ -131,7 +187,9 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
     }
   }
 
+  /// 同一条目上的操作串行执行：执行期间该卡片交互被禁用，避免重复提交。
   Future<void> _runBusy(int id, Future<void> Function() action) async {
+    if (_busyId != null) return;
     setState(() => _busyId = id);
     try {
       await action();
@@ -143,8 +201,9 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
   }
 
   Future<void> _edit(NotifyChannel channel) async {
-    await context.push('/notify/channels/${channel.id}/edit');
-    if (!mounted) return;
+    final saved =
+        await context.push<bool>('/notify/channels/${channel.id}/edit');
+    if (!mounted || saved != true) return;
     await _reloadQuietly();
   }
 
@@ -154,7 +213,7 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
           .read(notifyAlertRepoProvider)
           .updateNotifyChannel(channel.copyWith(enabled: !channel.enabled));
       if (mounted) {
-        showSnack(context, channel.enabled ? '渠道已停用' : '渠道已启用');
+        showSuccessSnack(context, channel.enabled ? '渠道已停用' : '渠道已启用');
       }
       await _reloadQuietly();
     });
@@ -163,7 +222,7 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
   Future<void> _test(NotifyChannel channel) async {
     await _runBusy(channel.id, () async {
       await ref.read(notifyAlertRepoProvider).testNotifyChannel(channel.id);
-      if (mounted) showSnack(context, '测试通知已发送，请到接收端确认');
+      if (mounted) showInfoSnack(context, '测试通知已发送，请到接收端确认');
     });
   }
 
@@ -179,18 +238,10 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
     if (!ok) return;
     await _runBusy(channel.id, () async {
       await ref.read(notifyAlertRepoProvider).deleteNotifyChannel(channel.id);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, '渠道已删除');
       ref.invalidate(notifySettingProvider);
       await _reloadQuietly();
     });
-  }
-
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(notifyChannelsProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
   }
 
   @override
@@ -203,7 +254,7 @@ class _ChannelsTabState extends ConsumerState<_ChannelsTab> {
             '保存后可用「发送测试通知」验证是否可达。',
       ),
       onRefresh: () => ref.read(notifyChannelsProvider.notifier).refresh(),
-      onLoadMore: _loadMore,
+      onLoadMore: () => ref.read(notifyChannelsProvider.notifier).loadMore(),
       onRetry: () => ref.invalidate(notifyChannelsProvider),
       emptyMessage: '暂无通知渠道',
       emptyIcon: Icons.mark_email_unread_outlined,
@@ -229,15 +280,33 @@ class _EventSettingTab extends ConsumerStatefulWidget {
 }
 
 class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
-  /// 本地草稿；为 null 表示尚未加载或已与服务端同步。
-  NotifySetting? _draft;
   bool _saving = false;
 
+  /// 草稿存在 [notifyEventDraftProvider] 里而不是本 State：`TabBarView` 切走
+  /// 会销毁本 Tab 的 State，草稿放在这里会被静默丢弃。
+  void _writeDraft(NotifySetting value) =>
+      ref.read(notifyEventDraftProvider.notifier).set(value);
+
   Future<void> _refresh() async {
-    setState(() => _draft = null);
+    if (ref.read(notifyEventDirtyProvider)) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '放弃未保存的修改',
+        content: '刷新会用服务器上的设置覆盖当前未保存的修改。确定继续？',
+        confirmText: '刷新',
+        cancelText: '继续编辑',
+        danger: true,
+      );
+      if (!ok || !mounted) return;
+    }
+    ref.read(notifyEventDraftProvider.notifier).clear();
     ref.invalidate(notifySettingProvider);
     ref.invalidate(allNotifyChannelsProvider);
-    await ref.read(notifySettingProvider.future);
+    try {
+      await ref.read(notifySettingProvider.future);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    }
   }
 
   void _toggleEvent(String event, bool selected, NotifySetting current) {
@@ -247,17 +316,18 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
     } else {
       events.remove(event);
     }
-    setState(() => _draft = current.copyWith(events: events));
+    _writeDraft(current.copyWith(events: events));
   }
 
   Future<void> _save(NotifySetting setting) async {
+    if (_saving) return;
     setState(() => _saving = true);
     try {
       await ref.read(notifyAlertRepoProvider).updateNotifySetting(setting);
       if (!mounted) return;
-      setState(() => _draft = null);
+      ref.read(notifyEventDraftProvider.notifier).clear();
       ref.invalidate(notifySettingProvider);
-      showSnack(context, '事件通知设置已保存');
+      showSuccessSnack(context, '事件通知设置已保存');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -269,6 +339,8 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final async = ref.watch(notifySettingProvider);
+    final draft = ref.watch(notifyEventDraftProvider);
+    final dirty = ref.watch(notifyEventDirtyProvider);
 
     if (!async.hasValue) {
       if (async.hasError) {
@@ -277,10 +349,12 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
           onRetry: () => ref.invalidate(notifySettingProvider),
         );
       }
-      return const LoadingView();
+      return const LoadingView(message: '加载事件通知设置…');
     }
 
-    final setting = _draft ?? async.requireValue;
+    final setting = draft ?? async.requireValue;
+    final summary = '已选 ${setting.events.length} 个事件 · '
+        '${setting.channels.length} 个渠道';
 
     return RefreshIndicator(
       onRefresh: _refresh,
@@ -290,7 +364,7 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
         children: [
           const InfoBanner(
             text: '勾选需要接收的系统事件，并选择接收通知的渠道。'
-                '未选择渠道时不会发送任何事件通知。',
+                '未选择渠道时不会发送任何事件通知。修改后需要点「保存设置」才会生效。',
           ),
           SectionCard(
             title: '订阅事件',
@@ -300,13 +374,23 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
                 for (final event in kNotifyEvents)
                   CheckboxListTile(
                     value: setting.events.contains(event.value),
-                    onChanged: (value) =>
-                        _toggleEvent(event.value, value ?? false, setting),
+                    onChanged: _saving
+                        ? null
+                        : (value) =>
+                            _toggleEvent(event.value, value ?? false, setting),
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(event.label),
-                    subtitle: Text(event.description),
+                    title: Text(
+                      event.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      event.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
               ],
             ),
@@ -315,15 +399,15 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
             title: '接收渠道',
             child: ChannelSelector(
               selected: setting.channels,
-              onChanged: (channels) => setState(
-                () => _draft = setting.copyWith(channels: channels),
-              ),
+              enabled: !_saving,
+              onChanged: (channels) =>
+                  _writeDraft(setting.copyWith(channels: channels)),
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: FilledButton.icon(
-              onPressed: _saving ? null : () => _save(setting),
+              onPressed: (_saving || !dirty) ? null : () => _save(setting),
               icon: _saving
                   ? const SizedBox(
                       width: 18,
@@ -337,9 +421,11 @@ class _EventSettingTabState extends ConsumerState<_EventSettingTab> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              '已选 ${setting.events.length} 个事件 · ${setting.channels.length} 个渠道',
+              dirty ? '$summary · 有未保存的修改' : summary,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                color: dirty
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),

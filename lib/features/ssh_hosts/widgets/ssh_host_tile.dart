@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/ssh_host.dart';
 import 'formatters.dart';
 
@@ -12,10 +13,14 @@ class SshHostTile extends StatelessWidget {
     super.key,
     required this.host,
     required this.onAction,
+    this.busy = false,
   });
 
   final SshHost host;
   final void Function(SshHostAction action) onAction;
+
+  /// 该主机正在执行删除等操作，期间禁用全部入口，防止重复触发。
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +37,7 @@ class SshHostTile extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => onAction(SshHostAction.terminal),
+        onTap: busy ? null : () => onAction(SshHostAction.terminal),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
           child: Row(
@@ -94,7 +99,15 @@ class SshHostTile extends StatelessWidget {
                     ],
                     const SizedBox(height: 6),
                     Text(
-                      '更新于 ${formatShortTime(host.updatedAt ?? host.createdAt)}',
+                      // 面板未返回更新时间时退回创建时间，文案随之改变，
+                      // 避免把创建时间说成「更新于」。
+                      host.updatedAt != null
+                          ? '更新于 ${formatShortTime(host.updatedAt)}'
+                          : host.createdAt != null
+                              ? '创建于 ${formatShortTime(host.createdAt)}'
+                              : '时间未知',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: colorScheme.outline,
                       ),
@@ -105,13 +118,15 @@ class SshHostTile extends StatelessWidget {
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
+                  A11yIconButton(
                     tooltip: '打开终端',
                     icon: const Icon(Icons.terminal_rounded),
-                    onPressed: () => onAction(SshHostAction.terminal),
+                    onPressed:
+                        busy ? null : () => onAction(SshHostAction.terminal),
                   ),
                   PopupMenuButton<SshHostAction>(
                     tooltip: '更多操作',
+                    enabled: !busy,
                     onSelected: onAction,
                     itemBuilder: (context) => const [
                       PopupMenuItem(
@@ -120,7 +135,7 @@ class SshHostTile extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           leading: Icon(Icons.folder_open_outlined),
-                          title: Text('文件浏览'),
+                          title: Text('浏览文件'),
                         ),
                       ),
                       PopupMenuItem(
@@ -129,7 +144,7 @@ class SshHostTile extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           leading: Icon(Icons.edit_outlined),
-                          title: Text('编辑'),
+                          title: Text('编辑主机'),
                         ),
                       ),
                       PopupMenuItem(
@@ -138,7 +153,7 @@ class SshHostTile extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           leading: Icon(Icons.delete_outline),
-                          title: Text('删除'),
+                          title: Text('删除主机'),
                         ),
                       ),
                     ],

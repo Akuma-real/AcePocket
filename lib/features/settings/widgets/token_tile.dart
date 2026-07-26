@@ -42,27 +42,29 @@ class TokenTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  // 窄屏上「令牌 #123 + 当前使用 + 已过期」一行放不下，
+                  // 用 Wrap 自动换行而不是溢出。
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         '令牌 #${token.id}',
                         style: theme.textTheme.titleSmall,
                       ),
-                      const SizedBox(width: 8),
                       if (inUse)
                         _Badge(
                           text: '当前使用',
                           color: theme.colorScheme.primaryContainer,
                           textColor: theme.colorScheme.onPrimaryContainer,
                         ),
-                      if (expired) ...[
-                        if (inUse) const SizedBox(width: 6),
+                      if (expired)
                         _Badge(
                           text: '已过期',
                           color: theme.colorScheme.errorContainer,
                           textColor: theme.colorScheme.onErrorContainer,
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -83,6 +85,8 @@ class TokenTile extends StatelessWidget {
                   ),
                   Text(
                     'IP 白名单：${token.ips.isEmpty ? '不限制' : token.ips.join('，')}',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -91,7 +95,7 @@ class TokenTile extends StatelessWidget {
               ),
             ),
             PopupMenuButton<String>(
-              tooltip: '更多操作',
+              tooltip: '令牌 #${token.id} 的更多操作',
               onSelected: (value) {
                 if (value == 'edit') onEdit();
                 if (value == 'delete') onDelete();

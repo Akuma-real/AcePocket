@@ -1,21 +1,10 @@
-/// SSH 主机模块的数值 / 时间格式化工具。
+/// SSH 主机模块的时间格式化工具。
+///
+/// 体积格式化统一用 `lib/core/utils/format.dart` 的 `formatBytes`
+/// （本文件此前的副本已删除，避免各模块口径不一致）。
 library;
 
 import 'package:intl/intl.dart';
-
-const List<String> _byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-
-/// 字节数转可读字符串，如 `1.23 GB`。
-String formatBytes(num bytes, {int decimals = 2}) {
-  var value = bytes.toDouble();
-  if (value.isNaN || value.isInfinite || value < 0) value = 0;
-  var index = 0;
-  while (value >= 1024 && index < _byteUnits.length - 1) {
-    value /= 1024;
-    index++;
-  }
-  return '${value.toStringAsFixed(index == 0 ? 0 : decimals)} ${_byteUnits[index]}';
-}
 
 final DateFormat _fullFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
 final DateFormat _shortFormat = DateFormat('yyyy-MM-dd HH:mm');

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -22,9 +24,23 @@ class LvmTab extends ConsumerStatefulWidget {
 class _LvmTabState extends ConsumerState<LvmTab> {
   String? _busy;
 
+  /// 确认流程（对话框链）是否已经在进行中，避免连点弹出多条确认链。
+  bool _inFlow = false;
+
   bool _isBusy(String key) => _busy == key;
 
-  bool get _locked => _busy != null;
+  bool get _locked => _busy != null || _inFlow;
+
+  /// 串行执行一条「对话框确认 → 调接口」的流程，期间禁用本页全部入口。
+  Future<void> _startFlow(Future<void> Function() flow) async {
+    if (_locked) return;
+    setState(() => _inFlow = true);
+    try {
+      await flow();
+    } finally {
+      if (mounted) setState(() => _inFlow = false);
+    }
+  }
 
   Future<void> _run(
     String key,
@@ -37,10 +53,10 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       ref.invalidate(lvmInfoProvider);
       ref.invalidate(diskListProvider);
       if (!mounted) return;
-      showSnack(context, successMessage);
+      showSuccessSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -67,7 +83,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       confirmText: '创建',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       'pv:create',
       () => ref.read(toolboxDiskRepoProvider).createPv(device),
@@ -84,7 +100,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       'pv:${pv.name}',
       () => ref.read(toolboxDiskRepoProvider).removePv(pv.name),
@@ -104,7 +120,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
           '${params.devices.join('\n')}',
       confirmText: '创建',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       'vg:create',
       () => ref
@@ -131,7 +147,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       requiredText: vg.name,
       confirmText: '删除卷组',
     );
-    if (!typed) return;
+    if (!typed || !mounted) return;
     await _run(
       'vg:${vg.name}',
       () => ref.read(toolboxDiskRepoProvider).removeVg(vg.name),
@@ -151,7 +167,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
           '创建后还需要格式化并挂载才能使用。',
       confirmText: '创建',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       'lv:create',
       () => ref.read(toolboxDiskRepoProvider).createLv(
@@ -180,7 +196,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       requiredText: lv.name,
       confirmText: '删除逻辑卷',
     );
-    if (!typed) return;
+    if (!typed || !mounted) return;
     await _run(
       'lv:${lv.path}',
       () => ref.read(toolboxDiskRepoProvider).removeLv(lv.path),
@@ -198,7 +214,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
           '${params.resize ? '，并同步扩展其上的文件系统' : '（不扩展文件系统）'}。',
       confirmText: '扩容',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     await _run(
       'lv:${lv.path}',
       () => ref.read(toolboxDiskRepoProvider).extendLv(
@@ -253,7 +269,8 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       trailing: _isBusy('pv:create')
           ? const BusyIndicator()
           : TextButton.icon(
-              onPressed: _locked ? null : () => _createPv(disks, lvm),
+              onPressed:
+                  _locked ? null : () => _startFlow(() => _createPv(disks, lvm)),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('创建'),
             ),
@@ -277,8 +294,8 @@ class _LvmTabState extends ConsumerState<LvmTab> {
               busy: _isBusy('pv:${pv.name}'),
               actions: [
                 _dangerAction(
-                  tooltip: '删除物理卷',
-                  onPressed: () => _removePv(pv),
+                  tooltip: '删除物理卷 ${pv.name}',
+                  onPressed: () => _startFlow(() => _removePv(pv)),
                 ),
               ],
             ),
@@ -294,7 +311,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       trailing: _isBusy('vg:create')
           ? const BusyIndicator()
           : TextButton.icon(
-              onPressed: _locked ? null : () => _createVg(lvm),
+              onPressed: _locked ? null : () => _startFlow(() => _createVg(lvm)),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('创建'),
             ),
@@ -317,8 +334,8 @@ class _LvmTabState extends ConsumerState<LvmTab> {
               busy: _isBusy('vg:${vg.name}'),
               actions: [
                 _dangerAction(
-                  tooltip: '删除卷组',
-                  onPressed: () => _removeVg(vg),
+                  tooltip: '删除卷组 ${vg.name}',
+                  onPressed: () => _startFlow(() => _removeVg(vg)),
                 ),
               ],
             ),
@@ -334,7 +351,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
       trailing: _isBusy('lv:create')
           ? const BusyIndicator()
           : TextButton.icon(
-              onPressed: _locked ? null : () => _createLv(lvm),
+              onPressed: _locked ? null : () => _startFlow(() => _createLv(lvm)),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('创建'),
             ),
@@ -355,14 +372,15 @@ class _LvmTabState extends ConsumerState<LvmTab> {
               subtitle: '卷组 ${lv.vgName} · 容量 ${lv.size}\n${lv.path}',
               busy: _isBusy('lv:${lv.path}'),
               actions: [
-                IconButton(
-                  tooltip: '扩容',
+                A11yIconButton(
+                  tooltip: '扩容逻辑卷 ${lv.name}',
                   icon: const Icon(Icons.open_in_full, size: 18),
-                  onPressed: _locked ? null : () => _extendLv(lv),
+                  onPressed:
+                      _locked ? null : () => _startFlow(() => _extendLv(lv)),
                 ),
                 _dangerAction(
-                  tooltip: '删除逻辑卷',
-                  onPressed: () => _removeLv(lv),
+                  tooltip: '删除逻辑卷 ${lv.name}',
+                  onPressed: () => _startFlow(() => _removeLv(lv)),
                 ),
               ],
             ),
@@ -375,7 +393,7 @@ class _LvmTabState extends ConsumerState<LvmTab> {
     required String tooltip,
     required VoidCallback onPressed,
   }) {
-    return IconButton(
+    return A11yIconButton(
       tooltip: tooltip,
       icon: Icon(
         Icons.delete_outline,

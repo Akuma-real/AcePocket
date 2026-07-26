@@ -23,9 +23,12 @@ final panelMemoProvider = FutureProvider.autoDispose<String>(
 
 /// 当前 API 令牌所属用户（`GET /api/user/info`）。
 ///
-/// 令牌管理页需要用它的 id 过滤令牌列表，故此处不使用 autoDispose，
-/// 便于跨页面复用缓存；切换服务器时 apiClientProvider 变化会自动重建。
-final currentUserProvider = FutureProvider<PanelUser>(
+/// **必须是 autoDispose**：历史上这里是常驻 FutureProvider，一次请求失败后
+/// AsyncError 会被永久缓存——令牌页的「重试」只 invalidate 了令牌列表，
+/// 而列表取数又依赖本 provider 的缓存错误，于是重试与下拉刷新都不会重新发起
+/// `/user/info` 请求，用户只能杀掉 App。改为 autoDispose 后离开页面即释放；
+/// 页面内的重试路径另外显式 `ref.invalidate(currentUserProvider)`。
+final currentUserProvider = FutureProvider.autoDispose<PanelUser>(
   (ref) => ref.watch(settingRepoProvider).currentUser(),
 );
 

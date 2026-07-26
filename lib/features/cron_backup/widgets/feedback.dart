@@ -1,32 +1,15 @@
-import 'package:flutter/material.dart';
+/// 本模块的提示与错误文案统一走 core 实现。
+///
+/// 历史上这里有一份复制的 `showSnack` / `showErrorSnack` / `describeError`，
+/// 错误提示只改了背景色、前景色沿用 SnackBar 默认值，浅色主题下几乎看不清；
+/// 现在改为直接转发 `core/widgets/app_snack.dart`（配色成对取自 ColorScheme、
+/// 带图标与关闭按钮、文案限 4 行）与 `core/api/api_exception.dart` 的
+/// `describeError`，避免两套实现继续分叉。
+///
+/// 用法：成功用 [showSuccessSnack]，中性提示用 [showInfoSnack]，
+/// 失败一律 [showErrorSnack]（入参可为任意异常对象或字符串）。
+library;
 
-import '../../../core/api/api_exception.dart';
-
-/// 把异常转换为可展示的中文提示。
-String describeError(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 普通提示。
-void showSnack(BuildContext context, String message) {
-  if (!context.mounted) return;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
-}
-
-/// 错误提示（错误色背景）。
-void showErrorSnack(BuildContext context, Object error) {
-  if (!context.mounted) return;
-  final colorScheme = Theme.of(context).colorScheme;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-      backgroundColor: colorScheme.errorContainer,
-      content: Text(
-        describeError(error),
-        style: TextStyle(color: colorScheme.onErrorContainer),
-      ),
-    ));
-}
+export '../../../core/api/api_exception.dart' show describeError;
+export '../../../core/widgets/app_snack.dart'
+    show showErrorSnack, showInfoSnack, showSuccessSnack;

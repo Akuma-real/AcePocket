@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -69,8 +70,8 @@ class _ProcessDetailSheet extends ConsumerWidget {
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: '刷新',
+              A11yIconButton(
+                tooltip: '刷新进程详情',
                 onPressed: () => ref.invalidate(processDetailProvider(pid)),
                 icon: const Icon(Icons.refresh),
               ),
@@ -105,7 +106,7 @@ class _ProcessDetailSheet extends ConsumerWidget {
                 SectionCard(
                   title: '资源占用',
                   child: _KeyValueList(entries: [
-                    ('CPU', formatPercent(process.cpu)),
+                    ('CPU', formatCpuPercent(process.cpu)),
                     ('常驻内存 RSS', formatBytes(process.rss)),
                     ('虚拟内存 VMS', formatBytes(process.vms)),
                     ('内存峰值 HWM', formatBytes(process.hwm)),

@@ -34,7 +34,7 @@ class HomeAppsCard extends ConsumerWidget {
           ),
         ),
         error: (error, _) => InlineError(
-          message: error is ApiException ? error.message : '$error',
+          message: describeError(error),
           onRetry: () => ref.invalidate(homeAppsProvider),
         ),
         data: (apps) => Wrap(
@@ -49,19 +49,30 @@ class HomeAppsCard extends ConsumerWidget {
                   color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(10),
                 ),
+                // Row 的非弹性子项按无限宽度布局，应用名或版本号一长就会
+                // 冲出 Wrap 的行宽（面板允许自定义应用名）。用 Flexible
+                // 让它们在拥挤时省略号收尾。
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      app.name.isEmpty ? app.slug : app.name,
-                      style: theme.textTheme.bodySmall,
+                    Flexible(
+                      child: Text(
+                        app.name.isEmpty ? app.slug : app.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
                     ),
                     if (app.version.isNotEmpty) ...[
                       const SizedBox(width: 6),
-                      Text(
-                        app.version,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                      Flexible(
+                        child: Text(
+                          app.version,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ],

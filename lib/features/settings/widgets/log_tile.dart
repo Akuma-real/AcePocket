@@ -75,6 +75,11 @@ class LogEntryTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = _levelColors(context, entry.level);
     final hasExtra = entry.extra.isNotEmpty;
+    final message = entry.msg.isEmpty ? '(无内容)' : entry.msg;
+    // 面板偶尔会记录整段堆栈 / SQL，不截断会让单个列表项占满好几屏。
+    // 长内容折行到 3 行，展开后再给出可选中的完整文本。
+    final longMessage = message.length > 120 || message.contains('\n');
+    final expandable = hasExtra || longMessage;
     final operator = entry.operatorName.isNotEmpty
         ? entry.operatorName
         : (entry.operatorId > 0 ? '#${entry.operatorId}' : '系统');
@@ -98,7 +103,9 @@ class LogEntryTile extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            entry.msg.isEmpty ? '(无内容)' : entry.msg,
+            message,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium,
           ),
         ),
@@ -133,7 +140,7 @@ class LogEntryTile extends StatelessWidget {
         side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
-      child: hasExtra
+      child: expandable
           ? Theme(
               // 去掉 ExpansionTile 的默认分割线，保持卡片观感统一。
               data: theme.copyWith(dividerColor: Colors.transparent),
@@ -143,16 +150,27 @@ class LogEntryTile extends StatelessWidget {
                     const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 title: content,
                 children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: SelectableText(
-                      _prettyJson(entry.extra),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
-                        color: theme.colorScheme.onSurfaceVariant,
+                  if (longMessage)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(
+                        message,
+                        style: theme.textTheme.bodyMedium,
                       ),
                     ),
-                  ),
+                  if (hasExtra) ...[
+                    if (longMessage) const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(
+                        _prettyJson(entry.extra),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             )

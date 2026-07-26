@@ -1,38 +1,46 @@
-/// 分页列表状态（供本模块各列表 Notifier 复用）。
-class PagedState<T> {
-  const PagedState({
-    required this.items,
-    required this.total,
-    required this.page,
-    this.loadingMore = false,
-  });
+import '../../../core/providers/paged_notifier_base.dart';
+import '../models/page_result.dart';
 
-  final List<T> items;
+export '../../../core/providers/paged_notifier_base.dart' show PagedState;
 
-  /// 服务端返回的总条数。
-  final int total;
+/// 本模块分页取数函数：给定页码（从 1 开始）与每页条数，返回该页数据。
+typedef CronBackupFetcher<T> = Future<PageResult<T>> Function(
+  int page,
+  int limit,
+);
 
-  /// 已加载到的页码（从 1 开始）。
-  final int page;
+/// 计划任务与备份模块的分页 Notifier 基类（无 family 参数）。
+///
+/// 并发控制（请求代次 / 在途标志 / loadMoreError）全部由
+/// [PagedAsyncNotifier] 提供，见 `core/providers/paged_notifier_base.dart`；
+/// 子类只需实现 [fetch]，并在 `build()` 里 `ref.watch` 对应 repo provider
+/// 后调用 `super.build()`。
+abstract class CronBackupPagedNotifier<T> extends PagedAsyncNotifier<T> {
+  /// 拉取第 [page] 页（页码从 1 开始），由子类实现。
+  Future<PageResult<T>> fetch(int page, int limit);
 
-  /// 是否正在加载下一页。
-  final bool loadingMore;
+  @override
+  Future<PagedResult<T>> fetchPage(int page, int limit) async {
+    final result = await fetch(page, limit);
+    return PagedResult(items: result.items, total: result.total);
+  }
 
-  /// 是否还有更多数据。
-  bool get hasMore => items.length < total;
+  /// 下拉刷新 / 增删改后重载第一页；失败时进入整页错误态（由 ErrorView 重试）。
+  Future<void> refresh() => reloadFirstPage(toErrorState: true);
+}
 
-  bool get isEmpty => items.isEmpty;
+/// 计划任务与备份模块的分页 Notifier 基类（带 family 参数，如按备份类型分页）。
+abstract class CronBackupPagedFamilyNotifier<T, Arg>
+    extends PagedFamilyAsyncNotifier<T, Arg> {
+  /// 拉取第 [page] 页（页码从 1 开始），由子类实现。
+  Future<PageResult<T>> fetch(int page, int limit);
 
-  PagedState<T> copyWith({
-    List<T>? items,
-    int? total,
-    int? page,
-    bool? loadingMore,
-  }) =>
-      PagedState<T>(
-        items: items ?? this.items,
-        total: total ?? this.total,
-        page: page ?? this.page,
-        loadingMore: loadingMore ?? this.loadingMore,
-      );
+  @override
+  Future<PagedResult<T>> fetchPage(int page, int limit) async {
+    final result = await fetch(page, limit);
+    return PagedResult(items: result.items, total: result.total);
+  }
+
+  /// 下拉刷新 / 增删改后重载第一页；失败时进入整页错误态。
+  Future<void> refresh() => reloadFirstPage(toErrorState: true);
 }

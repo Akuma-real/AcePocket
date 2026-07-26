@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 import '../models/website_setting.dart';
 
 /// 重定向编辑器，对应 `pkg/webserver/types.Redirect`。
@@ -125,6 +127,7 @@ class _RedirectCardState extends State<_RedirectCard> {
                     initialValue: const ['url', 'host', '404'].contains(r.type)
                         ? r.type
                         : 'url',
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: '类型'),
                     items: const [
                       DropdownMenuItem(value: 'url', child: Text('路径重定向')),
@@ -138,8 +141,8 @@ class _RedirectCardState extends State<_RedirectCard> {
                     },
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: r.from.isEmpty ? '删除这条重定向' : '删除重定向 ${r.from}',
                   color: theme.colorScheme.error,
                   onPressed: widget.onRemove,
                   icon: const Icon(Icons.remove_circle_outline),
@@ -183,6 +186,7 @@ class _RedirectCardState extends State<_RedirectCard> {
                           initialValue: _statusCodes.contains(r.statusCode)
                               ? r.statusCode
                               : 308,
+                          isExpanded: true,
                           decoration:
                               const InputDecoration(labelText: '状态码'),
                           items: [

@@ -169,9 +169,15 @@ class _CertAccountListPageState extends ConsumerState<CertAccountListPage> {
                       color: Theme.of(context).colorScheme.onSecondaryContainer,
                     ),
                   ),
-                  title: Text(account.email),
+                  title: Text(
+                    account.email,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     '$ca · ${_keyTypeLabel(account.keyType)}$created',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: _busyId == account.id
                       ? const SizedBox(
@@ -180,6 +186,7 @@ class _CertAccountListPageState extends ConsumerState<CertAccountListPage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : PopupMenuButton<String>(
+                          tooltip: '「${account.email}」的更多操作',
                           onSelected: (value) {
                             if (value == 'edit') {
                               _openForm(id: account.id);

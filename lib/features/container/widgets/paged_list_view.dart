@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -82,18 +84,8 @@ class _PagedListViewState<T> extends State<PagedListView<T>> {
       await widget.onRefresh();
     } catch (error) {
       if (!mounted) return;
-      final colorScheme = Theme.of(context).colorScheme;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              '刷新失败：$error',
-              style: TextStyle(color: colorScheme.onErrorContainer),
-            ),
-            backgroundColor: colorScheme.errorContainer,
-          ),
-        );
+      // 直接插值 error 会把 `ApiException: ` 之类的类型名丢给用户。
+      showErrorSnack(context, '刷新失败：${describeError(error)}');
     }
   }
 
@@ -180,8 +172,10 @@ class _Footer extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              '加载失败：$error',
+              '加载下一页失败：${describeError(error!)}',
               textAlign: TextAlign.center,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             ),

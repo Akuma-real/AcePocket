@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -20,10 +21,19 @@ import '../widgets/monitor_setting_dialog.dart';
 class MonitorPage extends ConsumerWidget {
   const MonitorPage({super.key});
 
+  /// 刷新监控数据。
+  ///
+  /// 请求失败时错误已由 `monitorDetailProvider` 的 AsyncValue 承载并在页面上
+  /// 展示，这里必须吞掉异常：直接把失败的 Future 交给 RefreshIndicator /
+  /// 按钮回调会变成一条无人处理的异步异常。
   Future<void> _refresh(WidgetRef ref) async {
     ref.invalidate(monitorSettingProvider);
     ref.invalidate(monitorDetailProvider);
-    await ref.read(monitorDetailProvider.future);
+    try {
+      await ref.read(monitorDetailProvider.future);
+    } catch (_) {
+      // 忽略：错误态由 async.when 的 error 分支渲染。
+    }
   }
 
   Future<void> _openSetting(BuildContext context, WidgetRef ref) async {
@@ -35,15 +45,15 @@ class MonitorPage extends ConsumerWidget {
     ref.invalidate(monitorSettingProvider);
     ref.invalidate(monitorDetailProvider);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('监控设置已保存')));
+    showSuccessSnack(context, '监控设置已保存');
   }
 
   Future<void> _clear(BuildContext context, WidgetRef ref) async {
     final ok = await showConfirmDialog(
       context,
       title: '清空监控数据',
-      content: '将删除面板上全部历史监控记录，且不可恢复。确定继续吗？',
+      content: '将删除面板上全部历史监控记录，且不可恢复。\n'
+          '清空后需要等采集任务重新积累数据，本页会暂时无图。确定继续吗？',
       confirmText: '清空',
       danger: true,
     );
@@ -52,12 +62,11 @@ class MonitorPage extends ConsumerWidget {
       await ref.read(monitorRepoProvider).clear();
       ref.invalidate(monitorDetailProvider);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('监控数据已清空')));
-    } on ApiException catch (e) {
+      showSuccessSnack(context, '监控数据已清空');
+    } catch (e) {
+      // 网络层异常（超时 / 证书）不是 ApiException，此前会漏掉、静默失败。
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      showErrorSnack(context, e);
     }
   }
 
@@ -87,13 +96,13 @@ class MonitorPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('历史监控'),
         actions: [
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
+            tooltip: '刷新监控数据',
             onPressed: () => _refresh(ref),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '打开更多操作菜单',
             onSelected: (value) {
               switch (value) {
                 case 'setting':
@@ -325,7 +334,7 @@ class _MonitorCharts extends ConsumerWidget {
           subtitle: '总量 ${formatMegabytes(detail.mem.total)}',
           times: detail.times,
           minY: 0,
-          valueFormatter: (v) => formatMegabytes(v, decimals: 1),
+          valueFormatter: (v) => formatMegabytes(v, fractionDigits: 1),
           series: [
             ChartSeries(
               name: '已用',
@@ -345,7 +354,7 @@ class _MonitorCharts extends ConsumerWidget {
             subtitle: '总量 ${formatMegabytes(detail.swap.total)}',
             times: detail.times,
             minY: 0,
-            valueFormatter: (v) => formatMegabytes(v, decimals: 1),
+            valueFormatter: (v) => formatMegabytes(v, fractionDigits: 1),
             series: [
               ChartSeries(
                 name: '已用',
@@ -389,12 +398,12 @@ class _MonitorCharts extends ConsumerWidget {
             title: '网络累计流量',
             times: detail.times,
             minY: 0,
-            valueFormatter: (v) => formatMegabytes(v, decimals: 1),
-            trailing: Text(
-              net.name,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+            valueFormatter: (v) => formatMegabytes(v, fractionDigits: 1),
+            trailing: _DeviceSelector(
+              names: netNames,
+              value: net.name,
+              onChanged: (value) =>
+                  ref.read(monitorNetDeviceProvider.notifier).state = value,
             ),
             series: [
               ChartSeries(
@@ -457,32 +466,50 @@ class _DeviceSelector extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;
 
+  /// 设备名可能很长（如 `br-1a2b3c4d5e6f`），而这里位于卡片标题行的尾部，
+  /// 不限宽会把标题挤没甚至溢出，因此统一限制最大宽度并省略号收尾。
+  static const double _maxWidth = 140;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (names.length <= 1) {
-      return Text(
-        value,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _maxWidth),
+        child: Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.end,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       );
     }
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: value,
-        isDense: true,
-        borderRadius: BorderRadius.circular(12),
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.onSurface,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: _maxWidth),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isDense: true,
+          isExpanded: true,
+          borderRadius: BorderRadius.circular(12),
+          alignment: Alignment.centerRight,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.onSurface,
+          ),
+          items: [
+            for (final name in names)
+              DropdownMenuItem<String>(
+                value: name,
+                child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          onChanged: (selected) {
+            if (selected != null) onChanged(selected);
+          },
         ),
-        items: [
-          for (final name in names)
-            DropdownMenuItem<String>(value: name, child: Text(name)),
-        ],
-        onChanged: (selected) {
-          if (selected != null) onChanged(selected);
-        },
       ),
     );
   }

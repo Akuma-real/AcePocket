@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/tamper_models.dart';
 import '../providers/security_providers.dart';
 import '../widgets/paged_list_view.dart';
@@ -27,6 +31,9 @@ class _TamperPageState extends ConsumerState<TamperPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController =
       TabController(length: 4, vsync: this);
+
+  /// 正在执行的页面级操作（`create` / `clear`），用于禁用按钮防重复提交。
+  String? _busyAction;
 
   @override
   void initState() {
@@ -54,8 +61,10 @@ class _TamperPageState extends ConsumerState<TamperPage>
   }
 
   Future<void> _createRule() async {
+    if (_busyAction != null) return;
     final draft = await showTamperRuleSheet(context);
-    if (draft == null) return;
+    if (draft == null || !mounted) return;
+    setState(() => _busyAction = 'create');
     try {
       await ref.read(securityRepoProvider).createTamperRule(
             name: draft.name,
@@ -67,10 +76,12 @@ class _TamperPageState extends ConsumerState<TamperPage>
       ref.invalidate(tamperRulesProvider);
       ref.invalidate(tamperStatusProvider);
       if (!mounted) return;
-      showSnack(context, '规则已创建');
+      showSuccessSnack(context, '规则已创建');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busyAction = null);
     }
   }
 
@@ -86,6 +97,7 @@ class _TamperPageState extends ConsumerState<TamperPage>
   }
 
   Future<void> _clearLogs() async {
+    if (_busyAction != null) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '清空拦截日志？',
@@ -93,15 +105,18 @@ class _TamperPageState extends ConsumerState<TamperPage>
       confirmText: '清空',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
+    setState(() => _busyAction = 'clear');
     try {
       await ref.read(securityRepoProvider).clearTamperLogs();
       ref.invalidate(tamperLogsProvider);
       if (!mounted) return;
-      showSnack(context, '拦截日志已清空');
+      showSuccessSnack(context, '拦截日志已清空');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busyAction = null);
     }
   }
 
@@ -111,16 +126,22 @@ class _TamperPageState extends ConsumerState<TamperPage>
       appBar: AppBar(
         title: const Text('防篡改'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新防篡改数据',
             icon: const Icon(Icons.refresh),
             onPressed: _refreshAll,
           ),
           if (_tabController.index == 2)
-            IconButton(
-              tooltip: '清空日志',
-              icon: const Icon(Icons.delete_sweep_outlined),
-              onPressed: _clearLogs,
+            A11yIconButton(
+              tooltip: '清空拦截日志',
+              icon: _busyAction == 'clear'
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_sweep_outlined),
+              onPressed: _busyAction == null ? _clearLogs : null,
             ),
         ],
         bottom: TabBar(
@@ -153,9 +174,16 @@ class _TamperPageState extends ConsumerState<TamperPage>
       ),
       floatingActionButton: _tabController.index == 1
           ? FloatingActionButton.extended(
-              onPressed: _createRule,
-              icon: const Icon(Icons.add),
-              label: const Text('新建规则'),
+              // 创建在途时禁用，避免连点提交出多条同名规则。
+              onPressed: _busyAction == null ? _createRule : null,
+              icon: _busyAction == 'create'
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add),
+              label: Text(_busyAction == 'create' ? '创建中…' : '新建规则'),
             )
           : null,
     );
@@ -171,19 +199,70 @@ class _TamperOverviewTab extends ConsumerStatefulWidget {
   ConsumerState<_TamperOverviewTab> createState() => _TamperOverviewTabState();
 }
 
-class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab> {
+/// 全局设置同样是「草稿 + 显式保存」：改动只落在 [_draft]，
+/// 因此每一项都要标出「未保存」，返回前也要拦一道（[UnsavedChangesGuard]）。
+///
+/// 用 [AutomaticKeepAliveClientMixin] 保活：不保活时切到「保护规则」再切回来，
+/// State 已被 TabBarView 释放，草稿会无声消失。
+class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab>
+    with AutomaticKeepAliveClientMixin {
   TamperSetting? _draft;
+
+  /// 服务端当前生效的设置，用于比对是否有未保存修改。
+  TamperSetting? _origin;
   bool _saving = false;
   bool _activating = false;
 
+  @override
+  bool get wantKeepAlive => true;
+
+  bool _fieldDirty(bool Function(TamperSetting setting) pick) {
+    final draft = _draft;
+    final origin = _origin;
+    if (draft == null || origin == null) return false;
+    return pick(draft) != pick(origin);
+  }
+
+  bool get _enabledDirty => _fieldDirty((s) => s.enabled);
+  bool get _modeDirty =>
+      _draft != null && _origin != null && _draft!.mode != _origin!.mode;
+  bool get _blockNewFilesDirty => _fieldDirty((s) => s.blockNewFiles);
+  bool get _logDaysDirty =>
+      _draft != null && _origin != null && _draft!.logDays != _origin!.logDays;
+
+  bool get _dirty =>
+      _enabledDirty || _modeDirty || _blockNewFilesDirty || _logDaysDirty;
+
+  void _reset() {
+    setState(() {
+      _draft = null;
+      _origin = null;
+    });
+  }
+
+  /// 丢弃草稿前的确认（无草稿时直接放行）。
+  Future<bool> _confirmDiscard() async {
+    if (!_dirty) return true;
+    return showConfirmDialog(
+      context,
+      title: '放弃修改',
+      content: '防篡改全局设置有修改尚未保存，这些改动还没有下发到面板，放弃后将丢失。',
+      confirmText: '放弃修改',
+      cancelText: '继续编辑',
+      danger: true,
+    );
+  }
+
   Future<void> _save(TamperStatus status) async {
     final draft = _draft;
-    if (draft == null) return;
+    if (draft == null || _saving) return;
     if (draft.enabled && draft.mode == 'ebpf' && !status.ebpf.available) {
-      showSnack(
+      showErrorSnack(
         context,
-        'eBPF 模式当前不可用：${status.ebpf.reason.isEmpty ? '环境不满足要求' : status.ebpf.reason}',
-        error: true,
+        ApiException(
+          'eBPF 模式当前不可用：'
+          '${status.ebpf.reason.isEmpty ? '环境不满足要求' : status.ebpf.reason}',
+        ),
       );
       return;
     }
@@ -191,18 +270,22 @@ class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab> {
     try {
       await ref.read(securityRepoProvider).saveTamperSetting(draft);
       if (!mounted) return;
-      setState(() => _draft = null);
+      setState(() {
+        _draft = null;
+        _origin = null;
+      });
       ref.invalidate(tamperStatusProvider);
-      showSnack(context, '防篡改设置已保存');
+      showSuccessSnack(context, '防篡改设置已保存');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _activateEbpf() async {
+    if (_activating) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '激活 eBPF 并重启系统？',
@@ -211,15 +294,15 @@ class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab> {
       confirmText: '激活并重启',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     setState(() => _activating = true);
     try {
       await ref.read(securityRepoProvider).activateEbpf();
       if (!mounted) return;
-      showSnack(context, '已提交激活请求，服务器正在重启…');
+      showSuccessSnack(context, '已提交激活请求，服务器正在重启…');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _activating = false);
     }
@@ -227,6 +310,7 @@ class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     final status = ref.watch(tamperStatusProvider);
 
@@ -237,208 +321,234 @@ class _TamperOverviewTabState extends ConsumerState<_TamperOverviewTab> {
         onRetry: () => ref.invalidate(tamperStatusProvider),
       ),
       data: (data) {
+        _origin ??= data.setting;
         final draft = _draft ??= data.setting;
-        return RefreshIndicator(
-          onRefresh: () async {
-            setState(() => _draft = null);
-            ref.invalidate(tamperStatusProvider);
-            await ref.read(tamperStatusProvider.future);
-          },
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 32),
-            children: [
-              if (!data.supported)
+        return UnsavedChangesGuard(
+          hasUnsavedChanges: _dirty && !_saving,
+          message: '防篡改全局设置改了但没保存，'
+              '这些改动还没有下发到面板，返回后将丢失。',
+          onDiscard: _reset,
+          child: RefreshIndicator(
+            onRefresh: () async {
+              if (!await _confirmDiscard() || !mounted) return;
+              _reset();
+              ref.invalidate(tamperStatusProvider);
+              await ref.read(tamperStatusProvider.future);
+            },
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(bottom: 32),
+              children: [
+                if (!data.supported)
+                  SectionCard(
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber_outlined,
+                            color: theme.colorScheme.error),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text('当前系统不支持防篡改功能（仅支持 Linux）'),
+                        ),
+                      ],
+                    ),
+                  ),
                 SectionCard(
-                  child: Row(
+                  title: '运行状态',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(Icons.warning_amber_outlined,
-                          color: theme.colorScheme.error),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text('当前系统不支持防篡改功能（仅支持 Linux）'),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Expanded(
+                            child: StatTile(
+                              label: '受保护文件',
+                              value: '${data.stats.protectedFiles}',
+                              icon: Icons.description_outlined,
+                            ),
+                          ),
+                          Expanded(
+                            child: StatTile(
+                              label: '受保护目录',
+                              value: '${data.stats.protectedDirs}',
+                              icon: Icons.folder_outlined,
+                            ),
+                          ),
+                          Expanded(
+                            child: StatTile(
+                              label: '运行状态',
+                              value: data.stats.running ? '运行中' : '未运行',
+                              icon: Icons.play_circle_outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      InfoRow(
+                        label: '当前模式',
+                        value: _modeLabel(
+                          data.stats.mode.isEmpty
+                              ? data.setting.mode
+                              : data.stats.mode,
+                        ),
                       ),
                     ],
                   ),
                 ),
-              SectionCard(
-                title: '运行状态',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        Expanded(
-                          child: StatTile(
-                            label: '受保护文件',
-                            value: '${data.stats.protectedFiles}',
-                            icon: Icons.description_outlined,
-                          ),
-                        ),
-                        Expanded(
-                          child: StatTile(
-                            label: '受保护目录',
-                            value: '${data.stats.protectedDirs}',
-                            icon: Icons.folder_outlined,
-                          ),
-                        ),
-                        Expanded(
-                          child: StatTile(
-                            label: '运行状态',
-                            value: data.stats.running ? '运行中' : '未运行',
-                            icon: Icons.play_circle_outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    InfoRow(
-                      label: '当前模式',
-                      value: _modeLabel(
-                        data.stats.mode.isEmpty
-                            ? data.setting.mode
-                            : data.stats.mode,
+                SectionCard(
+                  title: '全局设置',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SettingSwitchTile(
+                        title: '启用防篡改',
+                        subtitle: '按保护规则锁定目录中的文件',
+                        value: draft.enabled,
+                        dirty: _enabledDirty,
+                        onChanged: data.supported
+                            ? (value) => setState(
+                                () => _draft = draft.copyWith(enabled: value))
+                            : null,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              SectionCard(
-                title: '全局设置',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SettingSwitchTile(
-                      title: '启用防篡改',
-                      subtitle: '按保护规则锁定目录中的文件',
-                      value: draft.enabled,
-                      onChanged: data.supported
-                          ? (value) => setState(
-                              () => _draft = draft.copyWith(enabled: value))
-                          : null,
-                    ),
-                    SettingValueTile(
-                      title: '保护模式',
-                      value: _modeLabel(draft.mode),
-                      helper: 'chattr 通过文件属性锁定；eBPF 在内核层拦截，需内核支持',
-                      onTap: !data.supported
-                          ? null
-                          : () async {
-                              final mode = await showOptionsDialog<String>(
-                                context,
-                                title: '保护模式',
-                                options: const ['chattr', 'ebpf'],
-                                value: draft.mode,
-                                labelBuilder: _modeLabel,
-                                subtitleBuilder: (value) => value == 'ebpf'
-                                    ? (data.ebpf.available
-                                        ? '当前环境可用'
-                                        : '当前不可用：'
-                                            '${data.ebpf.reason.isEmpty ? '环境不满足要求' : data.ebpf.reason}')
-                                    : '兼容性最好，推荐使用',
-                              );
-                              if (mode == null || !mounted) return;
-                              setState(
-                                  () => _draft = draft.copyWith(mode: mode));
-                            },
-                    ),
-                    SettingSwitchTile(
-                      title: '拦截新建文件',
-                      subtitle: '在受保护目录中新建受保护类型文件时直接拦截',
-                      value: draft.blockNewFiles,
-                      onChanged: data.supported
-                          ? (value) => setState(() =>
-                              _draft = draft.copyWith(blockNewFiles: value))
-                          : null,
-                    ),
-                    SettingValueTile(
-                      title: '日志保留天数',
-                      value: '${draft.logDays} 天',
-                      onTap: !data.supported
-                          ? null
-                          : () async {
-                              final days = await showIntInputDialog(
-                                context,
-                                title: '日志保留天数',
-                                initialValue: draft.logDays,
-                                min: 1,
-                                max: 365,
-                                label: '天数',
-                              );
-                              if (days == null || !mounted) return;
-                              setState(
-                                  () => _draft = draft.copyWith(logDays: days));
-                            },
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: (!data.supported || _saving)
-                          ? null
-                          : () => _save(data),
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.save_outlined),
-                      label: const Text('保存设置'),
-                    ),
-                  ],
-                ),
-              ),
-              SectionCard(
-                title: 'eBPF 环境检测',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    InfoRow(
-                      label: '是否可用',
-                      value: data.ebpf.available ? '可用' : '不可用',
-                      valueColor: data.ebpf.available
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.error,
-                    ),
-                    InfoRow(
-                      label: '内核版本',
-                      value: data.ebpf.kernelVersion.isEmpty
-                          ? '未知'
-                          : data.ebpf.kernelVersion,
-                    ),
-                    InfoRow(
-                      label: 'bpf LSM',
-                      value: data.ebpf.bpfLsmActive ? '已启用' : '未启用',
-                    ),
-                    InfoRow(
-                      label: '活动 LSM',
-                      value: data.ebpf.activeLsm.isEmpty
-                          ? '未知'
-                          : data.ebpf.activeLsm,
-                    ),
-                    if (data.ebpf.reason.isNotEmpty)
-                      InfoRow(label: '原因', value: data.ebpf.reason),
-                    if (data.supported &&
-                        !data.ebpf.available &&
-                        !data.ebpf.bpfLsmActive) ...[
+                      SettingValueTile(
+                        title: '保护模式',
+                        value: _modeLabel(draft.mode),
+                        helper: 'chattr 通过文件属性锁定；eBPF 在内核层拦截，需内核支持',
+                        dirty: _modeDirty,
+                        onTap: !data.supported
+                            ? null
+                            : () async {
+                                final mode = await showOptionsDialog<String>(
+                                  context,
+                                  title: '保护模式',
+                                  options: const ['chattr', 'ebpf'],
+                                  value: draft.mode,
+                                  labelBuilder: _modeLabel,
+                                  subtitleBuilder: (value) => value == 'ebpf'
+                                      ? (data.ebpf.available
+                                          ? '当前环境可用'
+                                          : '当前不可用：'
+                                              '${data.ebpf.reason.isEmpty ? '环境不满足要求' : data.ebpf.reason}')
+                                      : '兼容性最好，推荐使用',
+                                );
+                                if (mode == null || !mounted) return;
+                                setState(
+                                    () => _draft = draft.copyWith(mode: mode));
+                              },
+                      ),
+                      SettingSwitchTile(
+                        title: '拦截新建文件',
+                        subtitle: '在受保护目录中新建受保护类型文件时直接拦截',
+                        value: draft.blockNewFiles,
+                        dirty: _blockNewFilesDirty,
+                        onChanged: data.supported
+                            ? (value) => setState(() =>
+                                _draft = draft.copyWith(blockNewFiles: value))
+                            : null,
+                      ),
+                      SettingValueTile(
+                        title: '日志保留天数',
+                        value: '${draft.logDays} 天',
+                        helper: '超过该天数的拦截日志会被自动清理',
+                        dirty: _logDaysDirty,
+                        onTap: !data.supported
+                            ? null
+                            : () async {
+                                final days = await showIntInputDialog(
+                                  context,
+                                  title: '日志保留天数',
+                                  initialValue: draft.logDays,
+                                  min: 1,
+                                  max: 365,
+                                  label: '天数',
+                                );
+                                if (days == null || !mounted) return;
+                                setState(
+                                    () => _draft = draft.copyWith(logDays: days));
+                              },
+                      ),
                       const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _activating ? null : _activateEbpf,
-                        icon: _activating
+                      // 未改动时按钮禁用并明说「设置未变更」，改动后才可提交，
+                      // 用户一眼能分清「已生效」与「等待保存」。
+                      FilledButton.icon(
+                        onPressed: (!data.supported || _saving || !_dirty)
+                            ? null
+                            : () => _save(data),
+                        icon: _saving
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Icon(Icons.bolt),
-                        label: const Text('激活 eBPF 并重启系统'),
+                            : const Icon(Icons.save_outlined),
+                        label: Text(_dirty ? '保存设置' : '设置未变更'),
                       ),
+                      if (_dirty && !_saving) ...[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () async {
+                            if (!await _confirmDiscard() || !mounted) return;
+                            _reset();
+                            ref.invalidate(tamperStatusProvider);
+                          },
+                          child: const Text('放弃修改'),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                SectionCard(
+                  title: 'eBPF 环境检测',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      InfoRow(
+                        label: '是否可用',
+                        value: data.ebpf.available ? '可用' : '不可用',
+                        valueColor: data.ebpf.available
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.error,
+                      ),
+                      InfoRow(
+                        label: '内核版本',
+                        value: data.ebpf.kernelVersion.isEmpty
+                            ? '未知'
+                            : data.ebpf.kernelVersion,
+                      ),
+                      InfoRow(
+                        label: 'bpf LSM',
+                        value: data.ebpf.bpfLsmActive ? '已启用' : '未启用',
+                      ),
+                      InfoRow(
+                        label: '活动 LSM',
+                        value: data.ebpf.activeLsm.isEmpty
+                            ? '未知'
+                            : data.ebpf.activeLsm,
+                      ),
+                      if (data.ebpf.reason.isNotEmpty)
+                        InfoRow(label: '原因', value: data.ebpf.reason),
+                      if (data.supported &&
+                          !data.ebpf.available &&
+                          !data.ebpf.bpfLsmActive) ...[
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _activating ? null : _activateEbpf,
+                          icon: _activating
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.bolt),
+                          label: const Text('激活 eBPF 并重启系统'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -478,10 +588,10 @@ class _TamperRulesTab extends ConsumerWidget {
       ref.invalidate(tamperRulesProvider);
       ref.invalidate(tamperStatusProvider);
       if (!context.mounted) return;
-      showSnack(context, '规则已更新');
+      showSuccessSnack(context, '规则已更新');
     } catch (e) {
       if (!context.mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
@@ -502,10 +612,10 @@ class _TamperRulesTab extends ConsumerWidget {
       ref.invalidate(tamperRulesProvider);
       ref.invalidate(tamperStatusProvider);
       if (!context.mounted) return;
-      showSnack(context, enabled ? '规则已启用' : '规则已停用');
+      showSuccessSnack(context, enabled ? '规则已启用' : '规则已停用');
     } catch (e) {
       if (!context.mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
@@ -521,16 +631,16 @@ class _TamperRulesTab extends ConsumerWidget {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !context.mounted) return;
     try {
       await ref.read(securityRepoProvider).deleteTamperRule(rule.id);
       ref.invalidate(tamperRulesProvider);
       ref.invalidate(tamperStatusProvider);
       if (!context.mounted) return;
-      showSnack(context, '规则已删除');
+      showSuccessSnack(context, '规则已删除');
     } catch (e) {
       if (!context.mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
@@ -551,7 +661,7 @@ class _TamperRulesTab extends ConsumerWidget {
           await notifier.refresh();
         } catch (e) {
           if (!context.mounted) return;
-          showSnack(context, errorMessage(e), error: true);
+          showErrorSnack(context, e);
         }
       },
       itemBuilder: (context, rule, index) => ListTile(
@@ -562,15 +672,26 @@ class _TamperRulesTab extends ConsumerWidget {
               ? theme.colorScheme.primary
               : theme.colorScheme.outline,
         ),
-        title: Text(rule.name),
+        title: Text(
+          rule.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(rule.path, style: theme.textTheme.bodySmall),
+            Text(
+              rule.path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
             const SizedBox(height: 2),
             Text(
               '后缀：${rule.exts.isEmpty ? '全部文件' : rule.exts.join('、')}'
               '${rule.excludes.isEmpty ? '' : ' · 排除：${rule.excludes.join('、')}'}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -578,6 +699,7 @@ class _TamperRulesTab extends ConsumerWidget {
           ],
         ),
         trailing: PopupMenuButton<String>(
+          tooltip: '规则操作',
           onSelected: (value) {
             switch (value) {
               case 'edit':
@@ -630,7 +752,7 @@ class _TamperLogsTab extends ConsumerWidget {
           await notifier.refresh();
         } catch (e) {
           if (!context.mounted) return;
-          showSnack(context, errorMessage(e), error: true);
+          showErrorSnack(context, e);
         }
       },
       itemBuilder: (context, log, index) => ListTile(
@@ -651,10 +773,16 @@ class _TamperLogsTab extends ConsumerWidget {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(log.path, style: theme.textTheme.bodySmall),
             Text(
+              log.path,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
+            Text(
+              // createdAt 已在 TamperLog.fromJson 里 toLocal()，此处不再重复转换。
               'PID ${log.pid}'
-              '${log.createdAt == null ? '' : ' · ${_format.format(log.createdAt!.toLocal())}'}',
+              '${log.createdAt == null ? '' : ' · ${_format.format(log.createdAt!)}'}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -744,10 +872,14 @@ class _TamperPathsTabState extends ConsumerState<_TamperPathsTab> {
       final added = merged.length - _paths.length;
       _setPaths(merged);
       if (!mounted) return;
-      showSnack(context, added == 0 ? '没有新的规则路径可导入' : '已导入 $added 个规则路径');
+      if (added == 0) {
+        showInfoSnack(context, '没有新的规则路径可导入');
+      } else {
+        showSuccessSnack(context, '已导入 $added 个规则路径');
+      }
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -764,8 +896,9 @@ class _TamperPathsTabState extends ConsumerState<_TamperPathsTab> {
         confirmText: '解除保护',
         danger: true,
       );
-      if (!confirmed) return;
+      if (!confirmed || !mounted) return;
     }
+    if (_busyPaths.contains(path)) return;
     setState(() => _busyPaths.add(path));
     try {
       await ref.read(securityRepoProvider).tamperProtect(path, protect);
@@ -773,10 +906,10 @@ class _TamperPathsTabState extends ConsumerState<_TamperPathsTab> {
       ref.invalidate(tamperRulesProvider);
       ref.invalidate(tamperStatusProvider);
       if (!mounted) return;
-      showSnack(context, protect ? '已开启保护' : '已解除保护');
+      showSuccessSnack(context, protect ? '已开启保护' : '已解除保护');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyPaths.remove(path));
     }
@@ -812,8 +945,8 @@ class _TamperPathsTabState extends ConsumerState<_TamperPathsTab> {
                     helperMaxLines: 2,
                     errorText: _inputError,
                     border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      tooltip: '添加',
+                    suffixIcon: A11yIconButton(
+                      tooltip: '添加待检查路径',
                       icon: const Icon(Icons.add),
                       onPressed: _addPath,
                     ),
@@ -843,7 +976,19 @@ class _TamperPathsTabState extends ConsumerState<_TamperPathsTab> {
                     ),
                     if (paths.isNotEmpty)
                       TextButton.icon(
-                        onPressed: () => _setPaths(const []),
+                        // 只清空本地待检查列表，不动服务器上的保护规则，
+                        // 但手输的路径重打一遍很烦，仍然问一句。
+                        onPressed: () async {
+                          final confirmed = await showConfirmDialog(
+                            context,
+                            title: '清空待检查列表？',
+                            content: '只会移除本页列出的 ${paths.length} 个路径，'
+                                '服务器上的保护规则不受影响。',
+                            confirmText: '清空列表',
+                          );
+                          if (!confirmed || !mounted) return;
+                          _setPaths(const []);
+                        },
                         icon: const Icon(Icons.clear_all),
                         label: const Text('清空列表'),
                       ),
@@ -973,6 +1118,8 @@ class _PathProtectTile extends StatelessWidget {
       ),
       title: Text(
         path,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
       ),
       subtitle: Text(
@@ -993,9 +1140,13 @@ class _PathProtectTile extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           else
-            Switch(value: protectedPath, onChanged: onChanged),
-          IconButton(
-            tooltip: '从列表移除',
+            // 列表里多行开关长得一样，读屏必须念出它控制的是哪个路径。
+            a11ySwitch(
+              label: '$path 的防篡改保护',
+              child: Switch(value: protectedPath, onChanged: onChanged),
+            ),
+          A11yIconButton(
+            tooltip: '把 $path 移出待检查列表',
             icon: const Icon(Icons.close),
             onPressed: busy ? null : onRemove,
           ),

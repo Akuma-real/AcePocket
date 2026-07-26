@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// 以底部弹层展示一个表单。
 Future<T?> showDbSheet<T>(BuildContext context, Widget sheet) {
   return showModalBottomSheet<T>(
@@ -69,11 +71,19 @@ class DbSheet extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(title, style: theme.textTheme.titleMedium),
+                        Text(
+                          title,
+                          style: theme.textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         if (subtitle != null) ...[
                           const SizedBox(height: 4),
                           Text(
+                            // 副标题常是「数据库：<很长的库名>」，限行避免顶栏被撑高。
                             subtitle!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -82,8 +92,8 @@ class DbSheet extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: '关闭',
+                  A11yIconButton(
+                    tooltip: '关闭表单',
                     onPressed: submitting
                         ? null
                         : () => Navigator.of(context).maybePop(),
@@ -204,17 +214,19 @@ class _PasswordFieldState extends State<PasswordField> {
         suffixIcon: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              tooltip: _obscure ? '显示' : '隐藏',
+            A11yIconButton(
+              tooltip: _obscure ? '显示密码' : '隐藏密码',
               onPressed: () => setState(() => _obscure = !_obscure),
               icon: Icon(
-                _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                _obscure
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
                 size: 20,
               ),
             ),
             if (widget.onGenerate != null)
-              IconButton(
-                tooltip: '随机生成',
+              A11yIconButton(
+                tooltip: '随机生成密码',
                 onPressed: widget.enabled
                     ? () {
                         widget.controller.text = widget.onGenerate!();

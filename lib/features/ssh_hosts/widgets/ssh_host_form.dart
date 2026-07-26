@@ -15,6 +15,7 @@ class SshHostForm extends StatefulWidget {
     required this.submitting,
     required this.submitLabel,
     required this.onSubmit,
+    this.onDirtyChanged,
   });
 
   /// 表单初值（新建传 [SshHostDraft.initial]，编辑传主机详情）。
@@ -26,6 +27,9 @@ class SshHostForm extends StatefulWidget {
   final String submitLabel;
 
   final ValueChanged<SshHostDraft> onSubmit;
+
+  /// 表单内容相对 [initial] 是否发生变化；供页面拦截「未保存就返回」。
+  final ValueChanged<bool>? onDirtyChanged;
 
   @override
   State<SshHostForm> createState() => _SshHostFormState();
@@ -54,9 +58,57 @@ class _SshHostFormState extends State<SshHostForm> {
   late SshAuthMethod _authMethod = widget.initial.authMethod;
   bool _obscurePassword = true;
   bool _obscurePassphrase = true;
+  bool _dirty = false;
+
+  /// 全部文本控制器，便于统一挂载 / 卸载「是否修改过」的监听。
+  late final List<TextEditingController> _controllers = [
+    _name,
+    _host,
+    _port,
+    _user,
+    _password,
+    _key,
+    _passphrase,
+    _remark,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    for (final controller in _controllers) {
+      controller.addListener(_notifyDirty);
+    }
+  }
+
+  /// 与初值逐项比较，得出是否存在未保存的修改。
+  ///
+  /// 文本字段按提交时的口径（trim / 原样）比较，避免只敲了一个空格就把
+  /// 「放弃修改」的确认框弹出来。
+  bool _computeDirty() {
+    final initial = widget.initial;
+    return _name.text.trim() != initial.name.trim() ||
+        _host.text.trim() != initial.host.trim() ||
+        (int.tryParse(_port.text.trim()) ?? -1) != initial.port ||
+        _authMethod != initial.authMethod ||
+        _user.text.trim() != initial.user.trim() ||
+        _password.text != initial.password ||
+        _key.text.trim() != initial.key.trim() ||
+        _passphrase.text != initial.passphrase ||
+        _remark.text.trim() != initial.remark.trim();
+  }
+
+  void _notifyDirty() {
+    final dirty = _computeDirty();
+    if (dirty == _dirty) return;
+    _dirty = dirty;
+    widget.onDirtyChanged?.call(dirty);
+  }
 
   @override
   void dispose() {
+    for (final controller in _controllers) {
+      controller.removeListener(_notifyDirty);
+    }
     _name.dispose();
     _host.dispose();
     _port.dispose();
@@ -122,8 +174,18 @@ class _SshHostFormState extends State<SshHostForm> {
                     hintText: '127.0.0.1',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) =>
-                      (value ?? '').trim().isEmpty ? '请输入主机地址' : null,
+                  validator: (value) {
+                    final text = (value ?? '').trim();
+                    if (text.isEmpty) return '请输入主机地址';
+                    // 常见误填：把「地址:端口」整串填进地址框。
+                    // IPv6 字面量含多个冒号，只拦截「一个冒号 + 纯数字」的情况。
+                    final parts = text.split(':');
+                    if (parts.length == 2 &&
+                        int.tryParse(parts.last) != null) {
+                      return '端口请填到右侧输入框';
+                    }
+                    return null;
+                  },
                 ),
               ),
               const SizedBox(width: 12),
@@ -142,7 +204,7 @@ class _SshHostFormState extends State<SshHostForm> {
                   validator: (value) {
                     final port = int.tryParse((value ?? '').trim());
                     if (port == null) return '请输入端口';
-                    if (port < 1 || port > 65535) return '1-65535';
+                    if (port < 1 || port > 65535) return '需在 1-65535 之间';
                     return null;
                   },
                 ),
@@ -165,6 +227,7 @@ class _SshHostFormState extends State<SshHostForm> {
             onChanged: (value) {
               if (value == null) return;
               setState(() => _authMethod = value);
+              _notifyDirty();
             },
           ),
           const SizedBox(height: 16),

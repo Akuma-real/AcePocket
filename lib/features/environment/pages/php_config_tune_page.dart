@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/php_models.dart';
 import '../providers/environment_providers.dart';
 import '../widgets/environment_ui.dart';
@@ -15,35 +18,87 @@ import '../widgets/environment_ui.dart';
 /// 对应 `GET/POST /environment/php/{version}/config_tune`：面板逐项读写
 /// `php.ini` 与 `php-fpm.conf`，留空表示注释掉该配置项。
 /// 另含 `POST /environment/php/{version}/clean_session`（清理 Session 文件）。
-class PhpConfigTunePage extends ConsumerWidget {
+///
+/// 本页有 6 张卡片 20 余项输入，误触返回或「重新载入」会清空全部草稿，
+/// 因此表单的「是否有未保存修改」上提到页面级（[_dirty]），
+/// 同时供 [UnsavedChangesGuard]（侧滑 / 返回键 / 返回箭头）与
+/// AppBar 的重新载入按钮消费，两条路径行为一致。
+class PhpConfigTunePage extends ConsumerStatefulWidget {
   const PhpConfigTunePage({super.key, required this.version});
 
   final int version;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tune = ref.watch(phpConfigTuneProvider(version));
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('参数调优 · PHP $version'),
-        actions: [
-          IconButton(
-            tooltip: '重新载入',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(phpConfigTuneProvider(version)),
+  ConsumerState<PhpConfigTunePage> createState() => _PhpConfigTunePageState();
+}
+
+class _PhpConfigTunePageState extends ConsumerState<PhpConfigTunePage> {
+  /// 表单是否有未保存修改，由 [_TuneForm] 写入。
+  ///
+  /// 用 [ValueNotifier] 而非 setState 上抛：避免每次脏标记翻转都重建
+  /// `tune.when(...)`，也避免在子组件 build 期间调用父级 setState。
+  final ValueNotifier<bool> _dirty = ValueNotifier<bool>(false);
+
+  /// 重新载入代次。并入表单 key，保证「放弃修改并重新载入」一定重建表单，
+  /// 即使服务端返回的数据与上一次完全一致（此时 key 的数据部分不变）。
+  int _reloadToken = 0;
+
+  @override
+  void dispose() {
+    _dirty.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload() async {
+    if (_dirty.value) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '放弃修改',
+        content: '重新载入会丢弃当前所有未保存的修改。',
+        confirmText: '放弃修改',
+        cancelText: '继续编辑',
+        danger: true,
+      );
+      if (!ok || !mounted) return;
+    }
+    _dirty.value = false;
+    setState(() => _reloadToken++);
+    ref.invalidate(phpConfigTuneProvider(widget.version));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tune = ref.watch(phpConfigTuneProvider(widget.version));
+    return ValueListenableBuilder<bool>(
+      valueListenable: _dirty,
+      builder: (context, dirty, _) => UnsavedChangesGuard(
+        hasUnsavedChanges: dirty,
+        message: '参数调优表单中有未保存的修改，确定放弃吗？',
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text('参数调优 · PHP ${phpVersionText(widget.version)}'),
+            actions: [
+              A11yIconButton(
+                tooltip: '重新载入配置',
+                icon: const Icon(Icons.refresh),
+                onPressed: _reload,
+              ),
+            ],
           ),
-        ],
-      ),
-      body: tune.when(
-        loading: () => const LoadingView(message: '读取 PHP 配置…'),
-        error: (error, _) => ErrorView(
-          error: error,
-          onRetry: () => ref.invalidate(phpConfigTuneProvider(version)),
-        ),
-        data: (data) => _TuneForm(
-          key: ValueKey(data.toJson().toString()),
-          version: version,
-          initial: data,
+          body: tune.when(
+            loading: () => const LoadingView(message: '读取 PHP 配置…'),
+            error: (error, _) => ErrorView(
+              error: error,
+              onRetry: () =>
+                  ref.invalidate(phpConfigTuneProvider(widget.version)),
+            ),
+            data: (data) => _TuneForm(
+              key: ValueKey('$_reloadToken:${data.toJson()}'),
+              version: widget.version,
+              initial: data,
+              dirty: _dirty,
+            ),
+          ),
         ),
       ),
     );
@@ -56,18 +111,25 @@ const List<String> _sessionHandlers = ['files', 'redis', 'memcached'];
 /// php-fpm 进程管理方式（服务端 `validate:"in:static,dynamic,ondemand"`）。
 const List<String> _pmModes = ['dynamic', 'static', 'ondemand'];
 
-/// 容量单位。
-const List<String> _sizeUnits = ['K', 'M', 'G'];
+/// 容量单位；空串表示不带单位（php.ini 中按字节计，也用于 `-1` 这类特殊值）。
+const List<String> _sizeUnits = ['', 'K', 'M', 'G'];
+
+/// 单位下拉的展示文案。
+String _sizeUnitLabel(String unit) => unit.isEmpty ? '字节' : unit;
 
 class _TuneForm extends ConsumerStatefulWidget {
   const _TuneForm({
     super.key,
     required this.version,
     required this.initial,
+    required this.dirty,
   });
 
   final int version;
   final PhpConfigTune initial;
+
+  /// 页面级的「有未保存修改」标记，见 [_PhpConfigTunePageState._dirty]。
+  final ValueNotifier<bool> dirty;
 
   @override
   ConsumerState<_TuneForm> createState() => _TuneFormState();
@@ -157,35 +219,76 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
   bool _saving = false;
   bool _cleaning = false;
 
+  /// 载入时的表单快照。
+  ///
+  /// 不能直接和 `widget.initial` 比较：控件对原始值做了归一化
+  /// （`1` → `On`、`50m` → `50` + `M`、未知 handler 回落 `files` 等），
+  /// 那样一进页面就会被判为「已修改」。这里以归一化后的首帧值为基准。
+  late String _baseline;
+
+  /// 与 [_baseline] 的比较结果，用于底部的未保存提示。
+  bool _localDirty = false;
+
+  /// 全部文本控制器，initState 挂监听、dispose 时释放，避免两处列表不同步。
+  late final List<TextEditingController> _controllers = [
+    _dateTimezone,
+    _errorReporting,
+    _disableFunctions,
+    _uploadMaxFilesize,
+    _postMaxSize,
+    _memoryLimit,
+    _maxFileUploads,
+    _maxExecutionTime,
+    _maxInputTime,
+    _maxInputVars,
+    _sessionSavePath,
+    _redisHost,
+    _redisPort,
+    _redisPassword,
+    _memcachedHost,
+    _memcachedPort,
+    _sessionGcMaxlifetime,
+    _sessionCookieLifetime,
+    _pmMaxChildren,
+    _pmStartServers,
+    _pmMinSpareServers,
+    _pmMaxSpareServers,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _baseline = _snapshot();
+    for (final controller in _controllers) {
+      controller.addListener(_syncDirty);
+    }
+  }
+
   @override
   void dispose() {
-    for (final controller in [
-      _dateTimezone,
-      _errorReporting,
-      _disableFunctions,
-      _uploadMaxFilesize,
-      _postMaxSize,
-      _memoryLimit,
-      _maxFileUploads,
-      _maxExecutionTime,
-      _maxInputTime,
-      _maxInputVars,
-      _sessionSavePath,
-      _redisHost,
-      _redisPort,
-      _redisPassword,
-      _memcachedHost,
-      _memcachedPort,
-      _sessionGcMaxlifetime,
-      _sessionCookieLifetime,
-      _pmMaxChildren,
-      _pmStartServers,
-      _pmMinSpareServers,
-      _pmMaxSpareServers,
-    ]) {
-      controller.dispose();
+    for (final controller in _controllers) {
+      controller
+        ..removeListener(_syncDirty)
+        ..dispose();
     }
     super.dispose();
+  }
+
+  /// 当前表单的可比较快照。
+  String _snapshot() => _collect().toJson().toString();
+
+  /// 重新计算脏标记并同步给页面（只在翻转时通知，避免无谓重建）。
+  void _syncDirty() {
+    final dirty = _snapshot() != _baseline;
+    if (dirty == _localDirty) return;
+    setState(() => _localDirty = dirty);
+    widget.dirty.value = dirty;
+  }
+
+  /// 下拉框等非文本控件改值后统一走这里，保证脏标记同步。
+  void _update(VoidCallback change) {
+    setState(change);
+    _syncDirty();
   }
 
   static String _normalizeOnOff(String raw) {
@@ -245,25 +348,32 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
       );
 
   Future<void> _save() async {
+    if (_saving) return;
     setState(() => _saving = true);
+    // 先取快照：保存过程中用户可能继续编辑，成功后只能把「已提交的内容」
+    // 当作新基准，否则会把在途修改误判为已保存。
+    final payload = _collect();
     try {
       await ref
           .read(environmentRepoProvider)
-          .updatePhpConfigTune(widget.version, _collect());
+          .updatePhpConfigTune(widget.version, payload);
+      if (!mounted) return;
+      _baseline = payload.toJson().toString();
+      _syncDirty();
       ref.invalidate(phpConfigTuneProvider(widget.version));
       ref.invalidate(phpIniProvider(widget.version));
       ref.invalidate(phpFpmConfigProvider(widget.version));
-      if (!mounted) return;
-      showEnvSnack(context, '配置已保存，需重启 PHP-FPM 后生效');
+      showSuccessSnack(context, '配置已保存，需重启 PHP-FPM 后生效');
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _cleanSession() async {
+    if (_cleaning) return;
     final ok = await showConfirmDialog(
       context,
       title: '清理 Session 文件？',
@@ -272,15 +382,15 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
       confirmText: '清理',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     setState(() => _cleaning = true);
     try {
       await ref.read(environmentRepoProvider).cleanPhpSession(widget.version);
       if (!mounted) return;
-      showEnvSnack(context, 'Session 文件已清理');
+      showSuccessSnack(context, 'Session 文件已清理');
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _cleaning = false);
     }
@@ -311,19 +421,50 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _saving ? null : _save,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_outlined, size: 18),
-                label: const Text('保存全部配置'),
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_localDirty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.edit_note_rounded,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.tertiary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '有未保存的修改',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color:
+                                      Theme.of(context).colorScheme.tertiary,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined, size: 18),
+                  label: Text(_saving ? '正在保存…' : '保存全部配置'),
+                ),
+              ],
             ),
           ),
         ),
@@ -342,7 +483,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
               label: '短标签 short_open_tag',
               child: _onOffDropdown(
                 value: _shortOpenTag,
-                onChanged: (v) => setState(() => _shortOpenTag = v),
+                onChanged: (v) => _update(() => _shortOpenTag = v),
               ),
             ),
             FormFieldRow(
@@ -355,7 +496,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
               helper: '生产环境建议 Off',
               child: _onOffDropdown(
                 value: _displayErrors,
-                onChanged: (v) => setState(() => _displayErrors = v),
+                onChanged: (v) => _update(() => _displayErrors = v),
               ),
             ),
             FormFieldRow(
@@ -405,7 +546,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
               child: _sizeField(
                 controller: _uploadMaxFilesize,
                 unit: _uploadUnit,
-                onUnitChanged: (v) => setState(() => _uploadUnit = v),
+                onUnitChanged: (v) => _update(() => _uploadUnit = v),
                 hint: '50',
               ),
             ),
@@ -415,7 +556,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
               child: _sizeField(
                 controller: _postMaxSize,
                 unit: _postUnit,
-                onUnitChanged: (v) => setState(() => _postUnit = v),
+                onUnitChanged: (v) => _update(() => _postUnit = v),
                 hint: '50',
               ),
             ),
@@ -425,11 +566,13 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
             ),
             FormFieldRow(
               label: '内存限制 memory_limit',
+              helper: '单位选「字节」并填 -1 表示不限制',
               child: _sizeField(
                 controller: _memoryLimit,
                 unit: _memoryUnit,
-                onUnitChanged: (v) => setState(() => _memoryUnit = v),
+                onUnitChanged: (v) => _update(() => _memoryUnit = v),
                 hint: '256',
+                allowNegative: true,
               ),
             ),
           ],
@@ -480,7 +623,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
                 ],
                 onChanged: (value) {
                   if (value == null) return;
-                  setState(() => _sessionHandler = value);
+                  _update(() => _sessionHandler = value);
                 },
               ),
             ),
@@ -563,7 +706,7 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
                 ],
                 onChanged: (value) {
                   if (value == null) return;
-                  setState(() => _pm = value);
+                  _update(() => _pm = value);
                 },
               ),
             ),
@@ -653,13 +796,20 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
     required String unit,
     required ValueChanged<String> onUnitChanged,
     String? hint,
+    bool allowNegative = false,
   }) {
     return Row(
       children: [
-        Expanded(child: _numberField(controller, hint: hint)),
+        Expanded(
+          child: _numberField(
+            controller,
+            hint: hint,
+            allowNegative: allowNegative,
+          ),
+        ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 88,
+          width: 96,
           child: DropdownButtonFormField<String>(
             initialValue: unit,
             isDense: true,
@@ -669,7 +819,14 @@ class _TuneFormState extends ConsumerState<_TuneForm> {
             ),
             items: [
               for (final item in _sizeUnits)
-                DropdownMenuItem(value: item, child: Text(item)),
+                DropdownMenuItem(
+                  value: item,
+                  child: Text(
+                    _sizeUnitLabel(item),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
             ],
             onChanged: (value) {
               if (value == null) return;

@@ -3,12 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../models/ssh_host.dart';
 import '../providers/ssh_hosts_providers.dart';
 import '../widgets/paged_list_view.dart';
-import '../widgets/ssh_feedback.dart';
 import '../widgets/ssh_host_tile.dart';
 
 /// SSH 主机列表页（`/ssh-hosts`）。
@@ -23,28 +24,37 @@ class SshHostsPage extends ConsumerStatefulWidget {
 }
 
 class _SshHostsPageState extends ConsumerState<SshHostsPage> {
+  /// 正在执行删除的主机 id，用于禁用重复点击。
+  int? _deletingId;
+
+  /// 重新拉取列表（下拉刷新 / 刷新按钮 / 增删改之后）。
+  ///
+  /// 走 Notifier 的 refresh 而非 invalidate：失败时保留现有列表并提示，
+  /// 不会把整页打回加载态。
   Future<void> _refresh() async {
+    ref.invalidate(sshHostOptionsProvider);
     try {
       await ref.read(sshHostsProvider.notifier).refresh();
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
-  void _reload() {
+  /// 首屏加载失败后的重试：整页回到加载态重新请求。
+  void _retry() {
     ref.invalidate(sshHostsProvider);
     ref.invalidate(sshHostOptionsProvider);
   }
 
   Future<void> _create() async {
     final created = await context.push<bool>('/ssh-hosts/new');
-    if (created == true) _reload();
+    if (created == true) await _refresh();
   }
 
   Future<void> _edit(SshHost host) async {
     final updated = await context.push<bool>('/ssh-hosts/${host.id}/edit');
-    if (updated == true) _reload();
+    if (updated == true) await _refresh();
   }
 
   void _openTerminal(SshHost host) {
@@ -70,6 +80,8 @@ class _SshHostsPageState extends ConsumerState<SshHostsPage> {
   }
 
   Future<void> _delete(SshHost host) async {
+    // 删除在途时忽略重复触发，避免对同一主机发出多次 DELETE。
+    if (_deletingId != null) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '删除主机「${host.displayName}」？',
@@ -77,15 +89,18 @@ class _SshHostsPageState extends ConsumerState<SshHostsPage> {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
+    setState(() => _deletingId = host.id);
     try {
       await ref.read(sshHostsRepoProvider).delete(host.id);
       if (!mounted) return;
-      _reload();
-      showSnack(context, '主机已删除');
+      showSuccessSnack(context, '主机「${host.displayName}」已删除');
+      await _refresh();
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
     }
   }
 
@@ -110,15 +125,15 @@ class _SshHostsPageState extends ConsumerState<SshHostsPage> {
       appBar: AppBar(
         title: const Text('SSH 主机'),
         actions: [
-          IconButton(
-            tooltip: '面板本机文件',
+          A11yIconButton(
+            tooltip: '浏览面板本机文件',
             icon: const Icon(Icons.folder_special_outlined),
             onPressed: _openLocalFiles,
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新主机列表',
             icon: const Icon(Icons.refresh),
-            onPressed: _reload,
+            onPressed: _refresh,
           ),
         ],
       ),
@@ -130,21 +145,24 @@ class _SshHostsPageState extends ConsumerState<SshHostsPage> {
       body: Column(
         children: [
           const FeatureUnsupportedBanner(feature: PanelFeature.sshHosts),
+          if (_deletingId != null) const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: PagedListView<SshHost>(
               state: state,
               onRefresh: _refresh,
               onLoadMore: () => ref.read(sshHostsProvider.notifier).loadMore(),
-              onRetry: _reload,
-              emptyMessage: '还没有保存任何 SSH 主机',
+              onRetry: _retry,
+              emptyMessage: '还没有保存任何 SSH 主机\n新建后可一键打开终端、浏览远程文件',
               emptyIcon: Icons.dns_outlined,
               emptyAction: FilledButton.icon(
                 onPressed: _create,
                 icon: const Icon(Icons.add),
                 label: const Text('新建主机'),
               ),
+              totalLabel: (total) => '共 $total 台主机',
               itemBuilder: (context, host, index) => SshHostTile(
                 host: host,
+                busy: _deletingId == host.id,
                 onAction: (action) => _onAction(host, action),
               ),
             ),

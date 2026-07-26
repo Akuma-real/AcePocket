@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/api/ws_client.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -40,6 +41,13 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
   final ScrollController _scrollController = ScrollController();
 
   List<String> _lines = [];
+
+  /// 已通过 `/file/tail` 读到的历史行数。
+  ///
+  /// 「加载更早的日志」的 offset 必须只算历史行：实时跟踪追加的新行也在
+  /// [_lines] 里，用 `_lines.length` 当 offset 会越过尚未读取的历史，
+  /// 中间那一段日志永远读不到。
+  int _tailLoaded = 0;
   bool _hasMore = false;
   bool _loading = true;
   bool _loadingMore = false;
@@ -75,6 +83,7 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
       if (!mounted) return;
       setState(() {
         _lines = result.lines;
+        _tailLoaded = result.lines.length;
         _hasMore = result.hasMore;
         _loading = false;
       });
@@ -94,12 +103,13 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
     try {
       final result = await ref.read(cronRepoProvider).tailLog(
             widget.path,
-            offset: _lines.length,
+            offset: _tailLoaded,
             limit: _pageLines,
           );
       if (!mounted) return;
       setState(() {
         _lines = [...result.lines, ..._lines];
+        _tailLoaded += result.lines.length;
         _hasMore = result.hasMore;
         _loadingMore = false;
       });
@@ -144,7 +154,7 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
         },
       );
       setState(() => _following = true);
-      showSnack(context, '已开启实时跟踪');
+      showSuccessSnack(context, '已开启实时跟踪');
     } on WsAuthException catch (e) {
       if (!mounted) return;
       await _showWsAuthDialog(e.message);
@@ -231,9 +241,10 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
       if (!mounted) return;
       setState(() {
         _lines = [];
+        _tailLoaded = 0;
         _hasMore = false;
       });
-      showSnack(context, '日志已清空');
+      showSuccessSnack(context, '日志已清空');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }
@@ -241,7 +252,7 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
 
   Future<void> _copyAll() async {
     await Clipboard.setData(ClipboardData(text: _lines.join('\n')));
-    if (mounted) showSnack(context, '日志已复制到剪贴板');
+    if (mounted) showSuccessSnack(context, '日志已复制到剪贴板');
   }
 
   @override
@@ -267,18 +278,19 @@ class _CronLogPageState extends ConsumerState<CronLogPage> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: _following ? '停止实时跟踪' : '实时跟踪',
+          A11yIconButton(
+            tooltip: _following ? '停止实时跟踪日志' : '开启实时跟踪日志',
             icon: Icon(_following ? Icons.pause_circle : Icons.play_circle),
             color: _following ? theme.colorScheme.primary : null,
             onPressed: server == null ? null : _toggleFollow,
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '重新读取日志',
             icon: const Icon(Icons.refresh),
             onPressed: server == null || _loading ? null : _reload,
           ),
           PopupMenuButton<String>(
+            tooltip: '更多日志操作',
             onSelected: (value) {
               if (value == 'copy') _copyAll();
               if (value == 'clear') _clear();

@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/webhook.dart';
 import '../providers/notify_alert_providers.dart';
 import '../widgets/form_fields.dart';
-import '../widgets/snack.dart';
 
 /// WebHook 表单页 `/webhooks/new` 与 `/webhooks/:id/edit`。
 class WebhookFormPage extends ConsumerStatefulWidget {
@@ -33,12 +35,43 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
   bool _status = true;
   String _key = '';
 
+  /// 表单是否有未保存的修改（与加载时的原始值逐项比较）。
+  bool _dirty = false;
+
+  /// [_apply] 回填控件期间不计入修改。
+  bool _applying = false;
+
+  /// 原始值快照。
+  String _pristine = '';
+
   bool get _isEdit => widget.webhookId != null;
 
   @override
   void initState() {
     super.initState();
+    for (final controller in <TextEditingController>[
+      _nameController,
+      _userController,
+      _scriptController,
+    ]) {
+      controller.addListener(_onFieldChanged);
+    }
     if (!_isEdit) _apply(WebHook.empty());
+  }
+
+  /// 当前表单值的快照，用于判断是否有未保存的修改。
+  String _snapshot() => <String>[
+        _nameController.text.trim(),
+        _userController.text.trim(),
+        _scriptController.text,
+        '$_raw',
+        '$_status',
+      ].join('\u0000');
+
+  void _onFieldChanged() {
+    if (_applying) return;
+    final dirty = _snapshot() != _pristine;
+    if (dirty != _dirty && mounted) setState(() => _dirty = dirty);
   }
 
   @override
@@ -50,6 +83,7 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
   }
 
   void _apply(WebHook webhook) {
+    _applying = true;
     _nameController.text = webhook.name;
     _userController.text = webhook.displayUser;
     _scriptController.text = webhook.script;
@@ -57,15 +91,19 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
     _status = webhook.status;
     _key = webhook.key;
     _initialized = true;
+    _pristine = _snapshot();
+    _dirty = false;
+    _applying = false;
   }
 
   Future<void> _copyUrl() async {
     final baseUrl = ref.read(webhookBaseUrlProvider);
     await Clipboard.setData(ClipboardData(text: '$baseUrl$_key'));
-    if (mounted) showSnack(context, '回调地址已复制');
+    if (mounted) showSuccessSnack(context, '回调地址已复制到剪贴板');
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final webhook = WebHook(
@@ -88,7 +126,8 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
         await repo.createWebhook(webhook);
       }
       if (!mounted) return;
-      showSnack(context, _isEdit ? 'WebHook 已保存' : 'WebHook 已创建');
+      _dirty = false;
+      showSuccessSnack(context, _isEdit ? 'WebHook 已保存' : 'WebHook 已创建');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -119,31 +158,35 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
       _apply(async.requireValue);
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 96),
-          children: [
-            _basicCard(),
-            _scriptCard(),
-          ],
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: 'WebHook 尚未保存，返回后填写的脚本与配置会丢失。确定放弃吗？',
+      child: Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 96),
+            children: [
+              _basicCard(),
+              _scriptCard(),
+            ],
+          ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(_saving ? '保存中…' : '保存'),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_saving ? '保存中…' : '保存'),
+            ),
           ),
         ),
       ),
@@ -186,7 +229,10 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
           const SizedBox(height: 8),
           SwitchListTile(
             value: _raw,
-            onChanged: (value) => setState(() => _raw = value),
+            onChanged: (value) {
+              setState(() => _raw = value);
+              _onFieldChanged();
+            },
             title: const Text('原始输出'),
             subtitle: const Text('以纯文本返回脚本输出，而非 JSON 包装'),
             contentPadding: EdgeInsets.zero,
@@ -194,7 +240,10 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
           if (_isEdit)
             SwitchListTile(
               value: _status,
-              onChanged: (value) => setState(() => _status = value),
+              onChanged: (value) {
+                setState(() => _status = value);
+                _onFieldChanged();
+              },
               title: const Text('启用'),
               subtitle: const Text('停用后回调请求不会执行脚本'),
               contentPadding: EdgeInsets.zero,
@@ -217,8 +266,8 @@ class _WebhookFormPageState extends ConsumerState<WebhookFormPage> {
                         ?.copyWith(fontFamily: 'monospace'),
                   ),
                 ),
-                IconButton(
-                  tooltip: '复制',
+                A11yIconButton(
+                  tooltip: '复制回调地址',
                   onPressed: _copyUrl,
                   icon: const Icon(Icons.copy_all_outlined),
                 ),

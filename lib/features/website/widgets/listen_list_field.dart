@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/a11y.dart';
 import '../models/website_setting.dart';
 
 /// 监听地址编辑器，对应 `pkg/webserver/types.Listen`。
@@ -91,8 +92,10 @@ class _ListenListFieldState extends State<ListenListField> {
                           },
                         ),
                       ),
-                      IconButton(
-                        tooltip: '删除',
+                      A11yIconButton(
+                        tooltip: listen.address.isEmpty
+                            ? '删除这条监听'
+                            : '删除监听 ${listen.address}',
                         color: theme.colorScheme.error,
                         onPressed: () {
                           final controller = _controllers.remove(listen);

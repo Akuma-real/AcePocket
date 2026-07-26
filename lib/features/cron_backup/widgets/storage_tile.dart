@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/backup_storage.dart';
 import 'format.dart';
 
@@ -69,6 +70,7 @@ class StorageTile extends StatelessWidget {
                     child: Text(
                       storage.name,
                       style: theme.textTheme.titleSmall,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -81,6 +83,8 @@ class StorageTile extends StatelessWidget {
                     ),
                     child: Text(
                       BackupStorageTypes.label(storage.type),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: colorScheme.onSecondaryContainer,
                       ),
@@ -105,19 +109,21 @@ class StorageTile extends StatelessWidget {
                       isLocal
                           ? '面板本地存储，不可编辑'
                           : '创建于 ${formatDateTimeShort(storage.createdAt)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.outline,
                       ),
                     ),
                   ),
                   if (!isLocal) ...[
-                    IconButton(
-                      tooltip: '编辑',
+                    A11yIconButton(
+                      tooltip: '编辑此备份存储',
                       icon: const Icon(Icons.edit_outlined),
                       onPressed: onEdit,
                     ),
-                    IconButton(
-                      tooltip: '删除',
+                    A11yIconButton(
+                      tooltip: '删除此备份存储',
                       icon:
                           Icon(Icons.delete_outline, color: colorScheme.error),
                       onPressed: onDelete,

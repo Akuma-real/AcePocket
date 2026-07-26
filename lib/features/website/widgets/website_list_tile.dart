@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/website.dart';
 import 'formatters.dart';
 
@@ -70,21 +71,29 @@ class WebsiteListTile extends StatelessWidget {
                     ),
                   ),
                   if (busy)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Semantics(
+                        label: '网站 ${website.name} 正在处理中',
+                        child: const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       ),
                     )
                   else
-                    Switch(
-                      value: website.status,
-                      onChanged: onToggleStatus,
+                    // 读屏下裸 Switch 是匿名的，盲用户无法知道停用的是哪个网站；
+                    // 开 / 关状态由 Switch 自身播报，标签只说明控制对象。
+                    a11ySwitch(
+                      label: '网站 ${website.name} 的运行状态',
+                      child: Switch(
+                        value: website.status,
+                        onChanged: onToggleStatus,
+                      ),
                     ),
                   PopupMenuButton<String>(
-                    tooltip: '更多操作',
+                    tooltip: '网站 ${website.name} 的更多操作',
                     onSelected: (value) {
                       switch (value) {
                         case 'edit':

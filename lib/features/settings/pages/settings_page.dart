@@ -1,14 +1,17 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/panel_setting.dart';
 import '../providers/settings_providers.dart';
 import '../widgets/memo_card.dart';
@@ -18,11 +21,35 @@ import '../widgets/setting_fields.dart';
 ///
 /// 面板要求提交完整设置结构，因此本页在原始设置对象上 copyWith，
 /// 未在移动端暴露的字段（如 hidden_menu、two_fa）原样回传，避免被清空。
-class SettingsPage extends ConsumerWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  /// 表单重建代次。
+  ///
+  /// 历史问题：`_SettingForm` 没有 key，14 个 controller 只在 initState 里
+  /// 初始化一次，provider 拿到新数据后表单纹丝不动——下拉刷新的「将丢弃未保存
+  /// 修改」确认形同虚设，保存后也看不到服务端归一化后的真实值。
+  ///
+  /// 只用「设置内容签名」做 key 仍不够：用户确认放弃草稿后，若服务端返回的设置
+  /// 与上次完全一致，签名不变、State 不重建，草稿依旧留在输入框里。因此每次
+  /// **显式重载 / 保存成功**都自增本计数，强制重建表单。
+  int _formEpoch = 0;
+
+  /// 重新拉取面板设置，并强制表单丢弃当前草稿、接收服务端返回的新值。
+  void _reloadForm() {
+    setState(() => _formEpoch++);
+    ref.invalidate(panelSettingProvider);
+    // 便签也在本页，一并重新拉取，否则下拉刷新只刷了一半内容。
+    ref.invalidate(panelMemoProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final settingAsync = ref.watch(panelSettingProvider);
 
     return Scaffold(
@@ -33,18 +60,37 @@ class SettingsPage extends ConsumerWidget {
         loading: () => const LoadingView(message: '正在加载面板设置…'),
         error: (error, _) => ErrorView(
           error: error,
-          onRetry: () => ref.invalidate(panelSettingProvider),
+          onRetry: _reloadForm,
         ),
-        data: (setting) => _SettingForm(original: setting),
+        data: (setting) => _SettingForm(
+          // 内容签名保证「保存后服务端归一化的值」能回灌到表单；
+          // epoch 保证「内容没变但用户要求重载」时也强制重建。
+          key: ValueKey('$_formEpoch#${settingSignature(setting)}'),
+          original: setting,
+          onReloadRequested: _reloadForm,
+        ),
       ),
     );
   }
 }
 
+/// 设置对象的内容签名，用于判断表单草稿是否偏离服务端值。
+///
+/// `PanelSetting` 没有实现 `==`，这里以 `toJson()` 的 JSON 串作为等价比较依据
+/// （字段顺序由 `toJson()` 的字面量固定，结果稳定可比）。
+String settingSignature(PanelSetting setting) => jsonEncode(setting.toJson());
+
 class _SettingForm extends ConsumerStatefulWidget {
-  const _SettingForm({required this.original});
+  const _SettingForm({
+    super.key,
+    required this.original,
+    required this.onReloadRequested,
+  });
 
   final PanelSetting original;
+
+  /// 请求父级重新拉取设置并重建本表单（丢弃草稿）。
+  final VoidCallback onReloadRequested;
 
   @override
   ConsumerState<_SettingForm> createState() => _SettingFormState();
@@ -118,6 +164,36 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
   bool _saving = false;
   bool _obtaining = false;
 
+  /// 初始表单内容的签名，用于判断是否存在未保存草稿。
+  ///
+  /// 取的是 `_buildSetting()` 的结果而非 `widget.original`：`_buildSetting()`
+  /// 会把空入口归一化为 `/`，两边用同一个函数才不会一进页面就误判为「已修改」。
+  late final String _baseline;
+
+  /// 表单是否存在未保存修改。
+  bool _formDirty = false;
+
+  /// 便签是否存在未保存修改（由 [MemoCard] 上报）。
+  bool _memoDirty = false;
+
+  bool get _hasUnsavedChanges => _formDirty || _memoDirty;
+
+  /// 文本输入变化后重算草稿状态。
+  ///
+  /// 只在「脏 / 净」翻转时 setState，避免每敲一个键都重建整张长表单。
+  void _syncDirty() {
+    final dirty = settingSignature(_buildSetting()) != _baseline;
+    if (dirty != _formDirty) setState(() => _formDirty = dirty);
+  }
+
+  /// 修改下拉 / 开关 / 列表类字段：更新状态的同时刷新草稿标记。
+  void _update(VoidCallback change) {
+    setState(() {
+      change();
+      _formDirty = settingSignature(_buildSetting()) != _baseline;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -152,6 +228,9 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
     _bindIp = List<String>.from(s.bindIp);
     _bindUa = List<String>.from(s.bindUa);
     _publicIp = List<String>.from(s.publicIp);
+
+    // 所有字段就位后再取基线，供未保存拦截比对。
+    _baseline = settingSignature(_buildSetting());
   }
 
   @override
@@ -216,10 +295,9 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先修正表单中的错误')),
-      );
+      showErrorSnack(context, '请先修正表单中标红的字段后再保存');
       return;
     }
 
@@ -241,7 +319,7 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
         confirmText: '仍要保存',
         danger: true,
       );
-      if (!ok) return;
+      if (!ok || !mounted) return;
     }
 
     setState(() => _saving = true);
@@ -274,46 +352,47 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('设置已保存')),
-        );
+        showSuccessSnack(context, '面板设置已保存');
       }
-      // 反馈展示完毕后再刷新，避免表单被重建导致提示丢失。
-      ref.invalidate(panelSettingProvider);
+      // 反馈展示完毕后再重载：表单会以服务端归一化后的值重建，
+      // 用户看到的即面板真实配置，草稿标记也随之清空。
+      widget.onReloadRequested();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e is ApiException ? e.message : '保存失败：$e')),
-      );
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _obtainCert() async {
+    if (_obtaining) return;
+    final isAcme = _tls == 'acme';
+    // 签发用的是**面板已保存**的 TLS 模式与公网 IP，草稿里的改动不参与，
+    // 不提示的话用户会以为「刚选的 ACME」已经生效。
+    final tlsChanged = _tls != widget.original.tls;
     final ok = await showConfirmDialog(
       context,
-      title: _tls == 'acme' ? '刷新面板证书' : '重新生成自签证书',
-      content: _tls == 'acme'
-          ? '将向 ACME 服务商申请新的面板证书，需要公网 IP 已正确填写，过程可能耗时较久。'
-          : '将重新生成面板自签名证书，签发完成后面板会重启。',
+      title: isAcme ? '重新签发面板证书' : '重新生成自签证书',
+      content: '${isAcme ? '将向 ACME 服务商申请新的面板证书，需要面板设置中的公网 IP 正确且可从公网访问，'
+              '过程可能耗时较久。' : '将重新生成面板自签名证书，签发完成后面板会重启。'}'
+          '${tlsChanged ? '\n\n注意：面板会按已保存的 TLS 模式'
+              '「${_tlsModes[widget.original.tls] ?? widget.original.tls}」签发，'
+              '当前表单里未保存的改动不会生效，请先保存设置。' : ''}',
       confirmText: '开始签发',
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _obtaining = true);
     try {
       await ref.read(settingRepoProvider).obtainCert();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('证书签发成功，面板即将重启')),
-      );
-      ref.invalidate(panelSettingProvider);
+      showSuccessSnack(context, '证书签发成功，面板即将重启');
+      // 证书内容变化后同样回读服务端值（会丢弃草稿，故只在无草稿时静默重载）。
+      if (!_hasUnsavedChanges) widget.onReloadRequested();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e is ApiException ? e.message : '签发失败：$e')),
-      );
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _obtaining = false);
     }
@@ -338,361 +417,394 @@ class _SettingFormState extends ConsumerState<_SettingForm> {
     final theme = Theme.of(context);
     final server = ref.watch(activeServerProvider);
 
-    return Form(
-      key: _formKey,
-      child: RefreshIndicator(
-        onRefresh: () async {
-          final ok = await showConfirmDialog(
-            context,
-            title: '重新加载设置',
-            content: '重新从面板拉取设置将丢弃当前未保存的修改，是否继续？',
-            confirmText: '重新加载',
-          );
-          if (ok) ref.invalidate(panelSettingProvider);
-        },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 32),
-          children: [
-            if (server != null)
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _hasUnsavedChanges,
+      message: '面板设置或便签有未保存的修改，返回将丢弃这些修改。',
+      child: Form(
+        key: _formKey,
+        child: RefreshIndicator(
+          onRefresh: () async {
+            // 无草稿时直接重载，不打扰用户。
+            if (!_hasUnsavedChanges) {
+              widget.onReloadRequested();
+              return;
+            }
+            final ok = await showConfirmDialog(
+              context,
+              title: '重新加载设置',
+              content: '重新从面板拉取设置将丢弃当前未保存的修改，是否继续？',
+              confirmText: '重新加载',
+              cancelText: '继续编辑',
+              danger: true,
+            );
+            if (ok) widget.onReloadRequested();
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 32),
+            children: [
+              if (server != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    '当前服务器：${server.name}（${server.normalizedBaseUrl}）',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+
+              // ------------------------------------------------------ 快捷入口
+              SectionCard(
+                title: '面板功能',
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.key_outlined),
+                      title: const Text('API 令牌'),
+                      subtitle: const Text('创建、更新与删除面板 API 令牌'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/settings/tokens'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.verified_user_outlined),
+                      title: const Text('面板证书'),
+                      subtitle: const Text('查看与更新面板 HTTPS 证书、私钥'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/settings/cert'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.checklist_outlined),
+                      title: const Text('任务中心'),
+                      subtitle: const Text('查看后台任务与执行日志'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/tasks'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: const Text('面板日志'),
+                      subtitle: const Text('操作 / 数据库 / HTTP / SSH 登录日志'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/logs'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('关于与外观'),
+                      subtitle: const Text('版本信息、主题模式'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/about'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.dns_outlined),
+                      title: const Text('服务器管理'),
+                      subtitle: const Text('切换、编辑本机保存的面板服务器'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/servers'),
+                    ),
+                  ],
+                ),
+              ),
+
+              // -------------------------------------------------------- 基础设置
+              SectionCard(
+                title: '基础设置',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SettingTextField(
+                      label: '面板名称',
+                      controller: _name,
+                      onChanged: (_) => _syncDirty(),
+                      hint: 'AcePanel',
+                      validator: (v) =>
+                          (v ?? '').trim().isEmpty ? '面板名称不能为空' : null,
+                    ),
+                    SettingDropdown<String>(
+                      label: '面板语言',
+                      value: _locale,
+                      items: _locales,
+                      helper: '影响面板 Web 端与接口返回的语言',
+                      onChanged: (v) => _update(() => _locale = v),
+                    ),
+                    SettingDropdown<String>(
+                      label: '更新渠道',
+                      value: _channel,
+                      items: _channels,
+                      onChanged: (v) => _update(() => _channel = v),
+                    ),
+                    SettingTextField(
+                      label: '面板端口',
+                      controller: _port,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '8888',
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: _validatePort,
+                    ),
+                    SettingTextField(
+                      label: '默认网站目录',
+                      controller: _websitePath,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '/opt/ace/sites',
+                      validator: (v) =>
+                          (v ?? '').trim().isEmpty ? '网站目录不能为空' : null,
+                    ),
+                    SettingTextField(
+                      label: '默认备份目录',
+                      controller: _backupPath,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '/opt/ace/backup',
+                      validator: (v) =>
+                          (v ?? '').trim().isEmpty ? '备份目录不能为空' : null,
+                    ),
+                    SettingDropdown<String>(
+                      label: '备份压缩格式',
+                      value: _backupFormat,
+                      items: _backupFormats,
+                      onChanged: (v) => _update(() => _backupFormat = v),
+                    ),
+                    SettingTextField(
+                      label: '默认项目目录',
+                      controller: _projectPath,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '/opt/ace/projects',
+                      validator: (v) =>
+                          (v ?? '').trim().isEmpty ? '项目目录不能为空' : null,
+                    ),
+                    SettingTextField(
+                      label: '容器 Socket',
+                      controller: _containerSock,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '/var/run/docker.sock',
+                    ),
+                    SettingTextField(
+                      label: '自定义 Logo',
+                      controller: _customLogo,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '请输入完整 URL',
+                      helper: '留空使用面板默认 Logo',
+                    ),
+                    SettingSwitchTile(
+                      title: '离线模式',
+                      subtitle: '开启后不再访问外部网络（无法检查更新）',
+                      value: _offlineMode,
+                      onChanged: (v) => _update(() => _offlineMode = v),
+                    ),
+                    SettingSwitchTile(
+                      title: '自动更新',
+                      subtitle: '面板有新版本时自动升级',
+                      value: _autoUpdate,
+                      onChanged: (v) => _update(() => _autoUpdate = v),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ------------------------------------------------------- IP 数据库
+              SectionCard(
+                title: 'IP 地理位置库',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SettingDropdown<String>(
+                      label: '来源',
+                      value: _ipdbType,
+                      items: _ipdbTypes,
+                      onChanged: (v) => _update(() => _ipdbType = v),
+                    ),
+                    if (_ipdbType == 'subscribe')
+                      SettingTextField(
+                        label: '订阅链接',
+                        controller: _ipdbUrl,
+                        onChanged: (_) => _syncDirty(),
+                        hint:
+                            'https://fastly.jsdelivr.net/npm/qqwry.ipdb/qqwry.ipdb',
+                        helper: '每周自动更新，兼容 IPIP.NET 格式（.ipdb）',
+                      ),
+                    if (_ipdbType == 'custom')
+                      SettingTextField(
+                        label: '本地文件路径',
+                        controller: _ipdbPath,
+                        onChanged: (_) => _syncDirty(),
+                        hint: '/opt/ace/panel/storage/geo.ipdb',
+                      ),
+                  ],
+                ),
+              ),
+
+              // -------------------------------------------------------- 安全设置
+              SectionCard(
+                title: '安全设置',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SettingTextField(
+                      label: '登录超时（分钟）',
+                      controller: _lifetime,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '120',
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: _validateLifetime,
+                    ),
+                    SettingTextField(
+                      label: '访问入口',
+                      controller: _entrance,
+                      onChanged: (_) => _syncDirty(),
+                      hint: '/mypanel',
+                      helper: '设置后须通过该路径访问面板；留空（或 /）表示不启用。'
+                          '修改后请同步更新 App 中的服务器配置',
+                    ),
+                    SettingDropdown<String>(
+                      label: '入口错误页',
+                      value: _entranceError,
+                      items: _entranceErrors,
+                      helper: '使用错误入口访问时返回的伪装页面',
+                      onChanged: (v) => _update(() => _entranceError = v),
+                    ),
+                    SettingSwitchTile(
+                      title: '登录验证码',
+                      subtitle: '连续 3 次登录失败后要求输入验证码',
+                      value: _loginCaptcha,
+                      onChanged: (v) => _update(() => _loginCaptcha = v),
+                    ),
+                    SettingTextField(
+                      label: '真实 IP 请求头',
+                      controller: _ipHeader,
+                      onChanged: (_) => _syncDirty(),
+                      hint: 'X-Real-IP',
+                      helper: '使用 CDN 或反向代理时填写，留空则直接使用连接 IP',
+                    ),
+                    StringListField(
+                      label: '绑定域名',
+                      values: _bindDomain,
+                      hint: 'panel.example.com',
+                      helper: '限制只能通过指定域名访问面板，留空不限制',
+                      onChanged: (v) => _update(() => _bindDomain = v),
+                    ),
+                    StringListField(
+                      label: '绑定 IP',
+                      values: _bindIp,
+                      hint: '192.0.2.10 或 10.0.0.0/8',
+                      helper: '限制可访问面板的来源 IP，支持 CIDR，留空不限制',
+                      onChanged: (v) => _update(() => _bindIp = v),
+                    ),
+                    StringListField(
+                      label: '绑定 UA',
+                      values: _bindUa,
+                      hint: 'Mozilla/5.0 ...',
+                      helper: '限制可访问面板的 User-Agent，留空不限制。'
+                          '注意：本 App 的 UA 与浏览器不同，谨慎使用',
+                      onChanged: (v) => _update(() => _bindUa = v),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ------------------------------------------------------ HTTPS 设置
+              SectionCard(
+                title: '面板 HTTPS',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SettingDropdown<String>(
+                      label: 'TLS 模式',
+                      value: _tls,
+                      items: _tlsModes,
+                      helper: '修改后面板会重启，App 中的服务器地址需同步改为 http/https',
+                      onChanged: (v) => _update(() => _tls = v),
+                    ),
+                    if (_tls == 'acme')
+                      StringListField(
+                        label: '公网 IP',
+                        values: _publicIp,
+                        hint: '203.0.113.10',
+                        helper: 'ACME 签发面板证书所需，须为可从公网访问的地址',
+                        onChanged: (v) => _update(() => _publicIp = v),
+                      ),
+                    if (_tls == 'custom') ...[
+                      SettingTextField(
+                        label: '证书（PEM）',
+                        controller: _cert,
+                        onChanged: (_) => _syncDirty(),
+                        maxLines: 6,
+                        hint: '-----BEGIN CERTIFICATE-----',
+                      ),
+                      SettingTextField(
+                        label: '私钥（PEM）',
+                        controller: _key,
+                        onChanged: (_) => _syncDirty(),
+                        maxLines: 6,
+                        hint: '-----BEGIN PRIVATE KEY-----',
+                      ),
+                    ],
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => context.push('/settings/cert'),
+                        icon: const Icon(Icons.description_outlined),
+                        label: const Text('只更新证书文件（不重启面板）'),
+                      ),
+                    ),
+                    if (_tls == 'acme' || _tls == 'self-signed')
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.tonalIcon(
+                          onPressed: _obtaining ? null : _obtainCert,
+                          icon: _obtaining
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.verified_user_outlined),
+                          label: Text(
+                            _obtaining
+                                ? '签发中…'
+                                : (_tls == 'acme' ? '刷新证书' : '重新生成证书'),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              MemoCard(
+                onDirtyChanged: (dirty) {
+                  if (mounted) setState(() => _memoDirty = dirty);
+                },
+              ),
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: FilledButton.icon(
+                  // 签发证书期间面板即将重启，此时保存会失败，一并禁用。
+                  onPressed: (_saving || _obtaining) ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined),
+                  label: Text(_saving ? '保存中…' : '保存面板设置'),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Text(
-                  '当前服务器：${server.name}（${server.normalizedBaseUrl}）',
+                  '提示：保存会提交完整设置结构，App 未展示的字段（如隐藏菜单）将原样回传，不会被清空。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
-
-            // ------------------------------------------------------ 快捷入口
-            SectionCard(
-              title: '面板功能',
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.key_outlined),
-                    title: const Text('API 令牌'),
-                    subtitle: const Text('创建、更新与删除面板 API 令牌'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/settings/tokens'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.verified_user_outlined),
-                    title: const Text('面板证书'),
-                    subtitle: const Text('查看与更新面板 HTTPS 证书、私钥'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/settings/cert'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.checklist_outlined),
-                    title: const Text('任务中心'),
-                    subtitle: const Text('查看后台任务与执行日志'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/tasks'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.receipt_long_outlined),
-                    title: const Text('面板日志'),
-                    subtitle: const Text('操作 / 数据库 / HTTP / SSH 登录日志'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/logs'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.info_outline),
-                    title: const Text('关于与外观'),
-                    subtitle: const Text('版本信息、主题模式'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/about'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.dns_outlined),
-                    title: const Text('服务器管理'),
-                    subtitle: const Text('切换、编辑本机保存的面板服务器'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/servers'),
-                  ),
-                ],
-              ),
-            ),
-
-            // -------------------------------------------------------- 基础设置
-            SectionCard(
-              title: '基础设置',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SettingTextField(
-                    label: '面板名称',
-                    controller: _name,
-                    hint: 'AcePanel',
-                    validator: (v) =>
-                        (v ?? '').trim().isEmpty ? '面板名称不能为空' : null,
-                  ),
-                  SettingDropdown<String>(
-                    label: '面板语言',
-                    value: _locale,
-                    items: _locales,
-                    helper: '影响面板 Web 端与接口返回的语言',
-                    onChanged: (v) => setState(() => _locale = v),
-                  ),
-                  SettingDropdown<String>(
-                    label: '更新渠道',
-                    value: _channel,
-                    items: _channels,
-                    onChanged: (v) => setState(() => _channel = v),
-                  ),
-                  SettingTextField(
-                    label: '面板端口',
-                    controller: _port,
-                    hint: '8888',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _validatePort,
-                  ),
-                  SettingTextField(
-                    label: '默认网站目录',
-                    controller: _websitePath,
-                    hint: '/opt/ace/sites',
-                    validator: (v) =>
-                        (v ?? '').trim().isEmpty ? '网站目录不能为空' : null,
-                  ),
-                  SettingTextField(
-                    label: '默认备份目录',
-                    controller: _backupPath,
-                    hint: '/opt/ace/backup',
-                    validator: (v) =>
-                        (v ?? '').trim().isEmpty ? '备份目录不能为空' : null,
-                  ),
-                  SettingDropdown<String>(
-                    label: '备份压缩格式',
-                    value: _backupFormat,
-                    items: _backupFormats,
-                    onChanged: (v) => setState(() => _backupFormat = v),
-                  ),
-                  SettingTextField(
-                    label: '默认项目目录',
-                    controller: _projectPath,
-                    hint: '/opt/ace/projects',
-                    validator: (v) =>
-                        (v ?? '').trim().isEmpty ? '项目目录不能为空' : null,
-                  ),
-                  SettingTextField(
-                    label: '容器 Socket',
-                    controller: _containerSock,
-                    hint: '/var/run/docker.sock',
-                  ),
-                  SettingTextField(
-                    label: '自定义 Logo',
-                    controller: _customLogo,
-                    hint: '请输入完整 URL',
-                    helper: '留空使用面板默认 Logo',
-                  ),
-                  SettingSwitchTile(
-                    title: '离线模式',
-                    subtitle: '开启后不再访问外部网络（无法检查更新）',
-                    value: _offlineMode,
-                    onChanged: (v) => setState(() => _offlineMode = v),
-                  ),
-                  SettingSwitchTile(
-                    title: '自动更新',
-                    subtitle: '面板有新版本时自动升级',
-                    value: _autoUpdate,
-                    onChanged: (v) => setState(() => _autoUpdate = v),
-                  ),
-                ],
-              ),
-            ),
-
-            // ------------------------------------------------------- IP 数据库
-            SectionCard(
-              title: 'IP 地理位置库',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SettingDropdown<String>(
-                    label: '来源',
-                    value: _ipdbType,
-                    items: _ipdbTypes,
-                    onChanged: (v) => setState(() => _ipdbType = v),
-                  ),
-                  if (_ipdbType == 'subscribe')
-                    SettingTextField(
-                      label: '订阅链接',
-                      controller: _ipdbUrl,
-                      hint: 'https://fastly.jsdelivr.net/npm/qqwry.ipdb/qqwry.ipdb',
-                      helper: '每周自动更新，兼容 IPIP.NET 格式（.ipdb）',
-                    ),
-                  if (_ipdbType == 'custom')
-                    SettingTextField(
-                      label: '本地文件路径',
-                      controller: _ipdbPath,
-                      hint: '/opt/ace/panel/storage/geo.ipdb',
-                    ),
-                ],
-              ),
-            ),
-
-            // -------------------------------------------------------- 安全设置
-            SectionCard(
-              title: '安全设置',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SettingTextField(
-                    label: '登录超时（分钟）',
-                    controller: _lifetime,
-                    hint: '120',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _validateLifetime,
-                  ),
-                  SettingTextField(
-                    label: '访问入口',
-                    controller: _entrance,
-                    hint: '/mypanel',
-                    helper: '设置后须通过该路径访问面板；留空（或 /）表示不启用。'
-                        '修改后请同步更新 App 中的服务器配置',
-                  ),
-                  SettingDropdown<String>(
-                    label: '入口错误页',
-                    value: _entranceError,
-                    items: _entranceErrors,
-                    helper: '使用错误入口访问时返回的伪装页面',
-                    onChanged: (v) => setState(() => _entranceError = v),
-                  ),
-                  SettingSwitchTile(
-                    title: '登录验证码',
-                    subtitle: '连续 3 次登录失败后要求输入验证码',
-                    value: _loginCaptcha,
-                    onChanged: (v) => setState(() => _loginCaptcha = v),
-                  ),
-                  SettingTextField(
-                    label: '真实 IP 请求头',
-                    controller: _ipHeader,
-                    hint: 'X-Real-IP',
-                    helper: '使用 CDN 或反向代理时填写，留空则直接使用连接 IP',
-                  ),
-                  StringListField(
-                    label: '绑定域名',
-                    values: _bindDomain,
-                    hint: 'panel.example.com',
-                    helper: '限制只能通过指定域名访问面板，留空不限制',
-                    onChanged: (v) => setState(() => _bindDomain = v),
-                  ),
-                  StringListField(
-                    label: '绑定 IP',
-                    values: _bindIp,
-                    hint: '1.2.3.4 或 10.0.0.0/8',
-                    helper: '限制可访问面板的来源 IP，支持 CIDR，留空不限制',
-                    onChanged: (v) => setState(() => _bindIp = v),
-                  ),
-                  StringListField(
-                    label: '绑定 UA',
-                    values: _bindUa,
-                    hint: 'Mozilla/5.0 ...',
-                    helper: '限制可访问面板的 User-Agent，留空不限制。'
-                        '注意：本 App 的 UA 与浏览器不同，谨慎使用',
-                    onChanged: (v) => setState(() => _bindUa = v),
-                  ),
-                ],
-              ),
-            ),
-
-            // ------------------------------------------------------ HTTPS 设置
-            SectionCard(
-              title: '面板 HTTPS',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SettingDropdown<String>(
-                    label: 'TLS 模式',
-                    value: _tls,
-                    items: _tlsModes,
-                    helper: '修改后面板会重启，App 中的服务器地址需同步改为 http/https',
-                    onChanged: (v) => setState(() => _tls = v),
-                  ),
-                  if (_tls == 'acme')
-                    StringListField(
-                      label: '公网 IP',
-                      values: _publicIp,
-                      hint: '203.0.113.10',
-                      helper: 'ACME 签发面板证书所需，须为可从公网访问的地址',
-                      onChanged: (v) => setState(() => _publicIp = v),
-                    ),
-                  if (_tls == 'custom') ...[
-                    SettingTextField(
-                      label: '证书（PEM）',
-                      controller: _cert,
-                      maxLines: 6,
-                      hint: '-----BEGIN CERTIFICATE-----',
-                    ),
-                    SettingTextField(
-                      label: '私钥（PEM）',
-                      controller: _key,
-                      maxLines: 6,
-                      hint: '-----BEGIN PRIVATE KEY-----',
-                    ),
-                  ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => context.push('/settings/cert'),
-                      icon: const Icon(Icons.description_outlined),
-                      label: const Text('只更新证书文件（不重启面板）'),
-                    ),
-                  ),
-                  if (_tls == 'acme' || _tls == 'self-signed')
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.tonalIcon(
-                        onPressed: _obtaining ? null : _obtainCert,
-                        icon: _obtaining
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.verified_user_outlined),
-                        label: Text(
-                          _obtaining
-                              ? '签发中…'
-                              : (_tls == 'acme' ? '刷新证书' : '重新生成证书'),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            const MemoCard(),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: FilledButton.icon(
-                onPressed: _saving ? null : _save,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_outlined),
-                label: Text(_saving ? '保存中…' : '保存面板设置'),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Text(
-                '提示：保存会提交完整设置结构，App 未展示的字段（如隐藏菜单）将原样回传，不会被清空。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

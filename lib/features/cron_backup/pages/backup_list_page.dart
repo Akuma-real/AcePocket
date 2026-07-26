@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -37,6 +38,9 @@ class BackupListPage extends ConsumerStatefulWidget {
 class _BackupListPageState extends ConsumerState<BackupListPage> {
   String _type = BackupTypes.website;
 
+  /// 正在提交创建 / 恢复请求，期间禁用入口避免重复下发同一个后台任务。
+  bool _submitting = false;
+
   @override
   Widget build(BuildContext context) {
     final server = ref.watch(activeServerProvider);
@@ -47,13 +51,13 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
         title: const Text('备份管理'),
         actions: [
           if (server != null)
-            IconButton(
+            A11yIconButton(
               tooltip: '上传备份文件',
               icon: const Icon(Icons.upload_file_outlined),
-              onPressed: () => _upload(_type),
+              onPressed: _submitting ? null : () => _upload(_type),
             ),
-          IconButton(
-            tooltip: '备份存储',
+          A11yIconButton(
+            tooltip: '管理备份存储',
             icon: const Icon(Icons.cloud_outlined),
             onPressed: () => context.push('/backups/storages'),
           ),
@@ -63,7 +67,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
           server == null || !BackupTypes.canCreate(_type)
               ? null
               : FloatingActionButton.extended(
-                  onPressed: _create,
+                  onPressed: _submitting ? null : _create,
                   icon: const Icon(Icons.add),
                   label: const Text('创建备份'),
                 ),
@@ -121,7 +125,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
           message: '暂无${BackupTypes.label(type)}备份',
           action: BackupTypes.canCreate(type)
               ? FilledButton.icon(
-                  onPressed: _create,
+                  onPressed: _submitting ? null : _create,
                   icon: const Icon(Icons.add),
                   label: const Text('创建备份'),
                 )
@@ -142,13 +146,9 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
     );
   }
 
-  Future<void> _loadMore(String type) async {
-    try {
-      await ref.read(backupListProvider(type).notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  /// 加载下一页；失败由 [PagedList] 在列表底部展示并重试，不再弹 SnackBar。
+  Future<void> _loadMore(String type) =>
+      ref.read(backupListProvider(type).notifier).loadMore();
 
   Future<void> _showInfo(BackupFile file, String type) async {
     final server = ref.read(activeServerProvider);
@@ -192,7 +192,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
     );
     if (!mounted || outcome == null) return;
     if (outcome.cancelled) {
-      showSnack(context, '下载已取消');
+      showInfoSnack(context, '下载已取消');
       return;
     }
     final error = outcome.error;
@@ -207,6 +207,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
 
   /// 从本机选择文件上传为备份（`POST /backup/{type}/upload`）。
   Future<void> _upload(String type) async {
+    if (_submitting) return;
     final BackupUploader uploader;
     try {
       uploader = ref.read(backupUploaderProvider);
@@ -262,7 +263,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
     );
     if (!mounted || outcome == null) return;
     if (outcome.cancelled) {
-      showSnack(context, '上传已取消');
+      showInfoSnack(context, '上传已取消');
       return;
     }
     final error = outcome.error;
@@ -270,18 +271,17 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
       showErrorSnack(context, error);
       return;
     }
-    showSnack(context, '上传成功');
-    try {
-      await ref.read(backupListProvider(type).notifier).refresh();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
+    showSuccessSnack(context, '上传成功');
+    // refresh 内部已把失败转成整页错误态，不会抛出。
+    await ref.read(backupListProvider(type).notifier).refresh();
   }
 
   Future<void> _create() async {
+    if (_submitting) return;
     final type = _type;
     final result = await showCreateBackupDialog(context, type: type);
     if (result == null || !mounted) return;
+    setState(() => _submitting = true);
     try {
       await ref.read(backupRepoProvider).create(
             type: type,
@@ -293,16 +293,20 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
       await ref.read(backupListProvider(type).notifier).refresh();
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
   Future<void> _restore(BackupFile file, String type) async {
+    if (_submitting) return;
     final target = await showRestoreTargetDialog(
       context,
       type: type,
       file: file,
     );
     if (target == null || !mounted) return;
+    setState(() => _submitting = true);
     try {
       await ref.read(backupRepoProvider).restore(
             type: type,
@@ -312,6 +316,8 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
       if (mounted) showTaskSubmittedSnack(context, '恢复任务已提交');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -326,7 +332,7 @@ class _BackupListPageState extends ConsumerState<BackupListPage> {
     if (!ok || !mounted) return;
     try {
       await ref.read(backupListProvider(type).notifier).delete(file);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, '已删除');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }

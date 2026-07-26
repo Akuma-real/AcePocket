@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
@@ -24,8 +27,15 @@ class SystemToolsPage extends ConsumerStatefulWidget {
 }
 
 class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
-  /// 当前正在执行的操作标识（用于禁用对应控件并展示进度）。
+  /// 当前正在执行的操作标识（用于禁用控件并展示进度）；null 表示空闲。
   String? _busy;
+
+  /// 是否有任意操作在途。
+  ///
+  /// 六个分区改的都是同一台机器的系统配置（改时区的同时又去改 SWAP 会让
+  /// 刷新结果互相覆盖，且 [_busy] 只能记住一个 key），因此在途期间
+  /// **所有**入口一律禁用，而不是只禁用发起操作的那一个。
+  bool get _anyBusy => _busy != null;
 
   bool _isBusy(String key) => _busy == key;
 
@@ -35,6 +45,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
     required String successMessage,
     bool refresh = true,
   }) async {
+    if (_anyBusy) return;
     setState(() => _busy = key);
     try {
       await action();
@@ -43,10 +54,10 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
         ref.invalidate(hostsContentProvider);
       }
       if (!mounted) return;
-      showSnack(context, successMessage);
+      showSuccessSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -65,10 +76,10 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       appBar: AppBar(
         title: const Text('系统工具'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新系统信息',
             icon: const Icon(Icons.refresh),
-            onPressed: _reload,
+            onPressed: _anyBusy ? null : _reload,
           ),
         ],
       ),
@@ -113,7 +124,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: 'DNS 设置',
         child: SectionErrorTile(
-          message: 'DNS 信息读取失败：${errorMessage(section.error!)}',
+          message: 'DNS 信息读取失败：${describeError(section.error!)}',
           onRetry: _reload,
         ),
       );
@@ -162,7 +173,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _isBusy('dns') ? null : edit,
+            onPressed: _anyBusy ? null : edit,
             icon: _isBusy('dns')
                 ? const BusyIndicator(size: 16)
                 : const Icon(Icons.edit_outlined),
@@ -181,7 +192,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: 'SWAP 管理',
         child: SectionErrorTile(
-          message: 'SWAP 信息读取失败：${errorMessage(section.error!)}',
+          message: 'SWAP 信息读取失败：${describeError(section.error!)}',
           onRetry: _reload,
         ),
       );
@@ -197,9 +208,17 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
         max: 1024 * 128,
         label: '大小（MB）',
         helperText: '填 0 表示关闭并删除面板创建的 SWAP 文件；'
-            '常见配置为物理内存的 1 ~ 2 倍。',
+            '常见配置为物理内存的 1 ~ 2 倍，最小 64 MB。',
+        // 面板只在 size > 1 时才创建新文件：填 1 会「删除旧 swap 又不建新的」，
+        // 界面上却提示设置成功，因此在客户端就把这个区间拦掉。
+        extraValidator: (value) =>
+            value > 0 && value < 64 ? '大小需为 0（关闭）或不小于 64 MB' : null,
       );
       if (size == null || !mounted) return;
+      if (size == swap.size) {
+        showInfoSnack(context, 'SWAP 大小未变化，无需设置');
+        return;
+      }
       final confirmed = await showConfirmDialog(
         context,
         title: size == 0 ? '关闭 SWAP？' : '设置 SWAP 为 $size MB？',
@@ -234,7 +253,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _isBusy('swap') ? null : edit,
+            onPressed: _anyBusy ? null : edit,
             icon: _isBusy('swap')
                 ? const BusyIndicator(size: 16)
                 : const Icon(Icons.tune),
@@ -266,7 +285,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: '时区与时间',
         child: SectionErrorTile(
-          message: '时区信息读取失败：${errorMessage(tzSection.error!)}',
+          message: '时区信息读取失败：${describeError(tzSection.error!)}',
           onRetry: _reload,
         ),
       );
@@ -274,12 +293,16 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
     final tz = tzSection.value;
 
     Future<void> pickTimezone() async {
+      if (tz.timezones.isEmpty) {
+        showInfoSnack(context, '服务器未返回可选时区列表，无法选择');
+        return;
+      }
       final selected = await showSearchableSelectDialog(
         context,
         title: '选择时区',
         options: tz.timezones,
         value: tz.timezone,
-        searchHint: '搜索时区，如 Shanghai',
+        searchHint: '搜索地区或城市，如 Asia Shanghai',
       );
       if (selected == null || selected == tz.timezone || !mounted) return;
       await _run(
@@ -352,19 +375,23 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
           SettingValueTile(
             title: '系统时区',
             value: tz.timezone,
-            helper: '共 ${tz.timezones.length} 个可选时区',
+            helper: tz.timezones.isEmpty
+                ? '服务器未返回可选时区列表'
+                : '共 ${tz.timezones.length} 个可选时区',
             icon: Icons.public,
             busy: _isBusy('timezone'),
-            onTap: pickTimezone,
+            onTap: _anyBusy ? null : pickTimezone,
           ),
           const Divider(height: 8),
           SettingValueTile(
             title: '手动设置时间',
-            value: '手机当前时间 ${_formatDateTime(DateTime.now())}',
-            helper: '所填时间按服务器时区写入系统时钟',
+            // 不展示「手机当前时间」：它只在页面重建时刷新，看起来像停走的钟。
+            value: '选择日期与时间后写入服务器',
+            helper: '所填时间按服务器时区${tz.timezone.isEmpty ? '' : '（${tz.timezone}）'}'
+                '写入系统时钟',
             icon: Icons.edit_calendar_outlined,
             busy: _isBusy('time'),
-            onTap: pickTime,
+            onTap: _anyBusy ? null : pickTime,
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -381,7 +408,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
                 ? const BusyIndicator()
                 : Icon(Icons.chevron_right,
                     color: theme.colorScheme.onSurfaceVariant),
-            onTap: _isBusy('sync_time') ? null : syncTime,
+            onTap: _anyBusy ? null : syncTime,
           ),
         ],
       ),
@@ -396,7 +423,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: 'NTP 服务器',
         child: SectionErrorTile(
-          message: 'NTP 配置读取失败：${errorMessage(section.error!)}',
+          message: 'NTP 配置读取失败：${describeError(section.error!)}',
           onRetry: _reload,
         ),
       );
@@ -455,7 +482,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _isBusy('ntp') ? null : edit,
+            onPressed: _anyBusy ? null : edit,
             icon: _isBusy('ntp')
                 ? const BusyIndicator(size: 16)
                 : const Icon(Icons.edit_outlined),
@@ -473,7 +500,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: '主机名',
         child: SectionErrorTile(
-          message: '主机名读取失败：${errorMessage(section.error!)}',
+          message: '主机名读取失败：${describeError(section.error!)}',
           onRetry: _reload,
         ),
       );
@@ -510,7 +537,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
         helper: 'hostnamectl hostname',
         icon: Icons.dns_outlined,
         busy: _isBusy('hostname'),
-        onTap: edit,
+        onTap: _anyBusy ? null : edit,
       ),
     );
   }
@@ -523,7 +550,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
       return SectionCard(
         title: 'hosts 文件',
         child: SectionErrorTile(
-          message: 'hosts 读取失败：${errorMessage(section.error!)}',
+          message: 'hosts 读取失败：${describeError(section.error!)}',
           onRetry: _reload,
         ),
       );
@@ -538,7 +565,7 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
     return SectionCard(
       title: 'hosts 文件',
       trailing: TextButton(
-        onPressed: () => context.push('/toolbox/system/hosts'),
+        onPressed: _anyBusy ? null : () => context.push('/toolbox/system/hosts'),
         child: const Text('编辑'),
       ),
       child: Column(
@@ -567,6 +594,9 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
               ),
               child: Text(
                 lines.take(6).join('\n') + (lines.length > 6 ? '\n…' : ''),
+                // 单条记录可能带一长串别名，限制行数免得预览把整页撑开。
+                maxLines: 8,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontFamily: 'monospace',
                 ),

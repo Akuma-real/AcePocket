@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
@@ -10,7 +11,6 @@ import '../../../core/widgets/loading_view.dart';
 import '../models/network_models.dart';
 import '../providers/toolbox_misc_providers.dart';
 import '../widgets/network_filter_sheet.dart';
-import '../widgets/toolbox_dialogs.dart';
 import '../widgets/toolbox_tiles.dart';
 
 /// 网络信息页：系统当前的 TCP / UDP 连接（含监听端口）。
@@ -54,7 +54,7 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
       await ref.read(networkConnectionsProvider.notifier).refresh();
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
@@ -303,7 +303,7 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
         '进程：${conn.process.isEmpty ? '未知' : conn.process}（PID ${conn.pid}）\n'
         '本地：${conn.local}\n远程：${conn.remote}';
     Clipboard.setData(ClipboardData(text: text));
-    showSnack(context, '连接信息已复制');
+    showSuccessSnack(context, '连接信息已复制');
   }
 
   Widget _footer(PagedState<NetworkConnection> paged, ThemeData theme) {

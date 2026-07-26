@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// 键值对编辑器（基本认证、代理请求头、上游服务器等）。
 ///
 /// 内部以有序列表维护键值，避免编辑过程中 Map 键冲突导致输入丢失；
@@ -90,11 +92,13 @@ class _KeyValueListFieldState extends State<KeyValueListField> {
               child: Text(widget.label, style: theme.textTheme.titleSmall),
             ),
             if (widget.obscureValue)
-              IconButton(
-                tooltip: _obscure ? '显示' : '隐藏',
+              A11yIconButton(
+                tooltip: _obscure ? '显示${widget.valueHint}' : '隐藏${widget.valueHint}',
                 onPressed: () => setState(() => _obscure = !_obscure),
                 icon: Icon(
-                  _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  _obscure
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
                   size: 20,
                 ),
               ),
@@ -134,8 +138,8 @@ class _KeyValueListFieldState extends State<KeyValueListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 条${widget.label}',
                   color: theme.colorScheme.error,
                   onPressed: () {
                     final removed = _entries.removeAt(i);

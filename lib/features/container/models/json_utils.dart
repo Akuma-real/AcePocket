@@ -85,21 +85,8 @@ String formatRelative(DateTime? value) {
   return '${(diff.inDays / 365).floor()} 年前';
 }
 
-/// 字节数格式化（面板部分接口已返回格式化字符串，此处用于本地计算的数值）。
-String formatBytes(num bytes) {
-  if (bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  var value = bytes.toDouble();
-  var unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  final text = value >= 100 || unitIndex == 0
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(2);
-  return '$text ${units[unitIndex]}';
-}
+// 字节数格式化统一用 core 的 `lib/core/utils/format.dart` 的 formatBytes，
+// 本文件不再自带一份（旧实现对 NaN / Infinity 无兜底，且与其他模块口径不一）。
 
 /// 截断长 ID（Docker ID 通常展示前 12 位；`sha256:` 前缀会被去掉）。
 String shortId(String id, [int length = 12]) {

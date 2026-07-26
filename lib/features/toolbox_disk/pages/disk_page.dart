@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../providers/toolbox_disk_providers.dart';
 import '../widgets/disk_tab.dart';
@@ -53,13 +54,13 @@ class _DiskPageState extends ConsumerState<DiskPage>
       appBar: AppBar(
         title: const Text('磁盘管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新当前标签页',
             icon: const Icon(Icons.refresh),
             onPressed: _refreshCurrent,
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '更多磁盘工具',
             onSelected: (value) {
               switch (value) {
                 case 'smart':

@@ -167,6 +167,8 @@ class BenchmarkState {
     this.errors = const <String, String>{},
     this.finishedAt,
     this.stopping = false,
+    this.startedAt,
+    this.stopped = false,
   });
 
   final bool running;
@@ -193,6 +195,12 @@ class BenchmarkState {
   /// 用户已请求停止，等待当前项目跑完。
   final bool stopping;
 
+  /// 本轮开始时间（本地时间），用于展示已用时。
+  final DateTime? startedAt;
+
+  /// 最近一轮是被用户中止的（而非跑完全部项目）。
+  final bool stopped;
+
   int get cpuTotal => cpuScores.values.fold<int>(0, (sum, v) => sum + v);
 
   int get memoryScore => memory?.score ?? 0;
@@ -217,6 +225,8 @@ class BenchmarkState {
     Map<String, String>? errors,
     DateTime? finishedAt,
     bool? stopping,
+    DateTime? startedAt,
+    bool? stopped,
   }) =>
       BenchmarkState(
         running: running ?? this.running,
@@ -229,5 +239,7 @@ class BenchmarkState {
         errors: errors ?? this.errors,
         finishedAt: finishedAt ?? this.finishedAt,
         stopping: stopping ?? this.stopping,
+        startedAt: startedAt ?? this.startedAt,
+        stopped: stopped ?? this.stopped,
       );
 }

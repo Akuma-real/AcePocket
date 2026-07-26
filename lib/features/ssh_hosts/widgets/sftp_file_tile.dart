@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/a11y.dart';
 import '../models/ssh_file_info.dart';
 import 'formatters.dart';
 
@@ -58,8 +60,8 @@ class SftpFileTile extends StatelessWidget {
           color: colorScheme.onSurfaceVariant,
         ),
       ),
-      trailing: IconButton(
-        tooltip: '详情',
+      trailing: A11yIconButton(
+        tooltip: '查看「${file.name}」详情',
         icon: const Icon(Icons.info_outline, size: 20),
         onPressed: onShowInfo,
       ),

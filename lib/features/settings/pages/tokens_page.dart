@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -51,22 +53,42 @@ class _TokensPageState extends ConsumerState<TokensPage> {
     }
   }
 
-  void _toast(String message) {
+  void _ok(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    showSuccessSnack(context, message);
   }
 
-  String _errorText(Object e) => e is ApiException ? e.message : '$e';
+  void _fail(Object error) {
+    if (!mounted) return;
+    showErrorSnack(context, error);
+  }
+
+  /// 重新拉取当前用户与令牌列表。
+  ///
+  /// 令牌列表取数依赖 `currentUserProvider`，用户信息一旦请求失败其错误会被
+  /// 缓存，只刷新列表并不会重新发起 `/user/info`，因此这里一并作废。
+  Future<void> _refreshAll() async {
+    ref.invalidate(currentUserProvider);
+    await ref.read(tokenListProvider.notifier).refresh();
+  }
+
+  /// 取当前用户；上次失败的缓存结果先作废，保证「重试」真的会重新请求。
+  Future<PanelUser?> _resolveUser() async {
+    if (ref.read(currentUserProvider).hasError) {
+      ref.invalidate(currentUserProvider);
+    }
+    try {
+      return await ref.read(currentUserProvider.future);
+    } catch (e) {
+      _fail(e);
+      return null;
+    }
+  }
 
   Future<void> _create() async {
-    final PanelUser user;
-    try {
-      user = await ref.read(currentUserProvider.future);
-    } catch (e) {
-      _toast('获取当前用户失败：${_errorText(e)}');
-      return;
-    }
-    if (!mounted) return;
+    if (_busy) return;
+    final user = await _resolveUser();
+    if (user == null || !mounted) return;
     final result = await showTokenEditorDialog(context);
     if (result == null || !mounted) return;
 
@@ -81,15 +103,16 @@ class _TokensPageState extends ConsumerState<TokensPage> {
       if (!mounted) return;
       await showTokenCreatedDialog(context, token);
     } catch (e) {
-      _toast('创建失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _edit(UserToken token) async {
+    if (_busy) return;
     final result = await showTokenEditorDialog(context, token: token);
-    if (result == null) return;
+    if (result == null || !mounted) return;
 
     setState(() => _busy = true);
     try {
@@ -99,32 +122,33 @@ class _TokensPageState extends ConsumerState<TokensPage> {
             expiredAt: result.expiredAt,
           );
       await ref.read(tokenListProvider.notifier).reload();
-      _toast('令牌 #${token.id} 已更新');
+      _ok('令牌 #${token.id} 已更新');
     } catch (e) {
-      _toast('更新失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _delete(UserToken token, bool inUse) async {
+    if (_busy) return;
     final ok = await showConfirmDialog(
       context,
       title: '删除令牌',
       content: '确定要删除令牌 #${token.id} 吗？删除后使用该令牌的调用方将立即失效。'
           '${inUse ? '\n\n警告：这是本 App 当前正在使用的令牌，删除后将无法继续连接该服务器！' : ''}',
-      confirmText: '删除',
+      confirmText: '删除令牌',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(tokenRepoProvider).delete(token.id);
       await ref.read(tokenListProvider.notifier).reload();
-      _toast('令牌 #${token.id} 已删除');
+      _ok('令牌 #${token.id} 已删除');
     } catch (e) {
-      _toast('删除失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -142,10 +166,13 @@ class _TokensPageState extends ConsumerState<TokensPage> {
       appBar: AppBar(
         title: const Text('API 令牌'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新令牌列表',
             icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(tokenListProvider),
+            onPressed: () {
+              ref.invalidate(currentUserProvider);
+              ref.invalidate(tokenListProvider);
+            },
           ),
         ],
       ),
@@ -171,16 +198,25 @@ class _TokensPageState extends ConsumerState<TokensPage> {
                   child: Text(
                     userAsync.when(
                       loading: () => '正在获取当前用户…',
-                      error: (e, _) => '当前用户获取失败：${_errorText(e)}',
+                      error: (e, _) => '当前用户获取失败：${describeError(e)}',
                       data: (user) =>
                           '当前用户：${user.username.isEmpty ? '#${user.id}' : user.username}'
                           '（令牌按用户隔离）',
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: userAsync.hasError
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
+                if (userAsync.hasError)
+                  TextButton(
+                    onPressed: () => ref.invalidate(currentUserProvider),
+                    child: const Text('重试'),
+                  ),
               ],
             ),
           ),
@@ -189,13 +225,16 @@ class _TokensPageState extends ConsumerState<TokensPage> {
               loading: () => const LoadingView(message: '正在加载令牌列表…'),
               error: (error, _) => ErrorView(
                 error: error,
-                onRetry: () => ref.invalidate(tokenListProvider),
+                onRetry: () {
+                  // 列表取数依赖用户信息，两者一起作废才能真正重试。
+                  ref.invalidate(currentUserProvider);
+                  ref.invalidate(tokenListProvider);
+                },
               ),
               data: (state) {
                 if (state.items.isEmpty) {
                   return RefreshIndicator(
-                    onRefresh: () =>
-                        ref.read(tokenListProvider.notifier).refresh(),
+                    onRefresh: _refreshAll,
                     child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       children: [
@@ -218,9 +257,9 @@ class _TokensPageState extends ConsumerState<TokensPage> {
                 return RefreshIndicator(
                   onRefresh: () async {
                     try {
-                      await ref.read(tokenListProvider.notifier).refresh();
+                      await _refreshAll();
                     } catch (e) {
-                      _toast('刷新失败：${_errorText(e)}');
+                      _fail(e);
                     }
                   },
                   child: ListView.builder(

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/website_stat.dart';
 import '../repo/website_stat_repo.dart';
@@ -127,93 +128,32 @@ final statSettingProvider = FutureProvider.autoDispose<StatSetting>(
 );
 
 /// 统计分页列表状态。
-class StatPagedState<T> {
-  const StatPagedState({
-    required this.items,
-    required this.total,
-    required this.page,
-    required this.hasMore,
-    this.loadingMore = false,
-    this.loadMoreError,
-  });
-
-  final List<T> items;
-  final int total;
-  final int page;
-  final bool hasMore;
-  final bool loadingMore;
-  final String? loadMoreError;
-
-  StatPagedState<T> copyWith({
-    List<T>? items,
-    int? total,
-    int? page,
-    bool? hasMore,
-    bool? loadingMore,
-    String? loadMoreError,
-    bool clearLoadMoreError = false,
-  }) =>
-      StatPagedState<T>(
-        items: items ?? this.items,
-        total: total ?? this.total,
-        page: page ?? this.page,
-        hasMore: hasMore ?? this.hasMore,
-        loadingMore: loadingMore ?? this.loadingMore,
-        loadMoreError:
-            clearLoadMoreError ? null : (loadMoreError ?? this.loadMoreError),
-      );
-}
+///
+/// 直接复用 core 的 [PagedState]，字段与旧的私有实现一致
+/// （`loadMoreError` 由 `String?` 改为 `Object?`，展示时用 `describeError`）。
+typedef StatPagedState<T> = PagedState<T>;
 
 /// 统计分页 Notifier 基类：子类只需实现 [fetch]。
+///
+/// 并发控制（请求代次、在途标志、过期响应丢弃）全部由
+/// [PagedFamilyAsyncNotifier] 提供——原先这里是一份手写分页，
+/// loadMore 与 refresh 交错时会把过期的第 2 页追加到刷新后的列表上。
 abstract class StatPagedNotifier<T>
-    extends AutoDisposeFamilyAsyncNotifier<StatPagedState<T>, StatQuery> {
+    extends PagedFamilyAsyncNotifier<T, StatQuery> {
+  @override
+  int get pageSize => kStatPageSize;
+
   /// 拉取第 [page] 页数据。
   Future<StatPage<T>> fetch(StatQuery query, int page);
 
   @override
-  Future<StatPagedState<T>> build(StatQuery arg) => _loadFirstPage();
-
-  Future<StatPagedState<T>> _loadFirstPage() async {
-    final result = await fetch(arg, 1);
-    return StatPagedState<T>(
-      items: result.items,
-      total: result.total,
-      page: 1,
-      hasMore: result.items.length >= kStatPageSize &&
-          result.items.length < result.total,
-    );
+  Future<PagedResult<T>> fetchPage(int page, int limit) async {
+    final result = await fetch(arg, page);
+    return PagedResult<T>(items: result.items, total: result.total);
   }
 
   /// 下拉刷新：重新加载第一页；失败时进入错误态由 ErrorView 展示。
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(_loadFirstPage);
-  }
-
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-
-    state = AsyncData(
-        current.copyWith(loadingMore: true, clearLoadMoreError: true));
-    final nextPage = current.page + 1;
-    try {
-      final result = await fetch(arg, nextPage);
-      final merged = [...current.items, ...result.items];
-      state = AsyncData(current.copyWith(
-        items: merged,
-        total: result.total,
-        page: nextPage,
-        hasMore: result.items.length >= kStatPageSize &&
-            merged.length < result.total,
-        loadingMore: false,
-      ));
-    } catch (e) {
-      state = AsyncData(current.copyWith(
-        loadingMore: false,
-        loadMoreError: e.toString(),
-      ));
-    }
-  }
+  Future<void> refresh() => reloadFirstPage(toErrorState: true);
 }
 
 /// URI 统计（分页）。

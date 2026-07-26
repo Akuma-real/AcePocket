@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/cert.dart';
 
 /// 证书状态。
@@ -188,9 +189,14 @@ class CertTile extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Switch(
-                    value: cert.autoRenewal,
-                    onChanged: busy ? null : (_) => onToggleAutoRenewal(),
+                  // 读屏只念「开关」无法分辨是哪张证书，补上控制对象；
+                  // 开 / 关状态由 Switch 自身播报，label 里不写状态词。
+                  a11ySwitch(
+                    label: '证书 ${cert.domains.isEmpty ? '（无域名）' : cert.domains.first} 的自动续签',
+                    child: Switch(
+                      value: cert.autoRenewal,
+                      onChanged: busy ? null : (_) => onToggleAutoRenewal(),
+                    ),
                   ),
                 ],
               ),
@@ -293,13 +299,17 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 标签列宽随系统字号放大，否则 200% 字号下「到期时间」会被挤成多行；
+    // 上限 140 是为了给右侧值留出足够宽度。
+    final labelWidth =
+        MediaQuery.textScalerOf(context).scale(76).clamp(76.0, 140.0);
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 76,
+            width: labelWidth,
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/app_snack.dart';
+
 /// 详情页的「标签 - 值」行。
 class InfoRow extends StatelessWidget {
   const InfoRow({
@@ -53,17 +55,17 @@ class InfoRow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: copyable && valueWidget == null
-                ? GestureDetector(
-                    onLongPress: () async {
-                      await Clipboard.setData(ClipboardData(text: value));
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context)
-                        ..hideCurrentSnackBar()
-                        ..showSnackBar(
-                          const SnackBar(content: Text('已复制到剪贴板')),
-                        );
-                    },
-                    child: content,
+                ? Semantics(
+                    // GestureDetector 会把长按暴露给读屏，这里补一句说明做什么。
+                    onLongPressHint: '复制$label',
+                    child: GestureDetector(
+                      onLongPress: () async {
+                        await Clipboard.setData(ClipboardData(text: value));
+                        if (!context.mounted) return;
+                        showSuccessSnack(context, '已复制$label');
+                      },
+                      child: content,
+                    ),
                   )
                 : content,
           ),

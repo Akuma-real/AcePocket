@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// 字符串动态输入列表（对应面板前端的 n-dynamic-input）。
 ///
 /// 用于 systemd 的依赖服务、启动顺序、读写 / 只读路径等多值字段。
@@ -126,8 +128,8 @@ class _StringListFieldState extends State<StringListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 行${widget.label}',
                   onPressed: () => _removeAt(i),
                   icon: Icon(
                     Icons.remove_circle_outline,

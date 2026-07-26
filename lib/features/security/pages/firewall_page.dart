@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/firewall_models.dart';
 import '../providers/security_providers.dart';
 import '../widgets/firewall_dialogs.dart';
 import '../widgets/paged_list_view.dart';
-import '../widgets/security_dialogs.dart';
 import '../widgets/security_tiles.dart';
 
 /// 防火墙页面：总开关 + 端口规则 / IP 规则 / 端口转发三个分页。
@@ -24,6 +26,9 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
   late final TabController _tabController =
       TabController(length: 3, vsync: this);
   bool _togglingFirewall = false;
+
+  /// 新建规则在途标志：请求返回前禁用 FAB，避免连点建出重复规则。
+  bool _creating = false;
 
   @override
   void initState() {
@@ -44,6 +49,7 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
   }
 
   Future<void> _toggleFirewall(bool value) async {
+    if (_togglingFirewall) return;
     if (!value) {
       final confirmed = await showConfirmDialog(
         context,
@@ -52,17 +58,17 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
         confirmText: '关闭',
         danger: true,
       );
-      if (!confirmed) return;
+      if (!confirmed || !mounted) return;
     }
     setState(() => _togglingFirewall = true);
     try {
       await ref.read(securityRepoProvider).updateFirewallStatus(value);
       ref.invalidate(firewallStatusProvider);
       if (!mounted) return;
-      showSnack(context, value ? '防火墙已开启' : '防火墙已关闭');
+      showSuccessSnack(context, value ? '防火墙已开启' : '防火墙已关闭');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _togglingFirewall = false);
     }
@@ -81,12 +87,14 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
   }
 
   Future<void> _create() async {
+    if (_creating) return;
     final repo = ref.read(securityRepoProvider);
     try {
       switch (_tabController.index) {
         case 0:
           final portRule = await showFirewallRuleSheet(context);
           if (portRule == null || !mounted) return;
+          setState(() => _creating = true);
           await repo.createFirewallRule(
             family: portRule.family,
             protocol: portRule.protocol,
@@ -100,19 +108,23 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
         case 1:
           final ipRule = await showFirewallIpRuleSheet(context);
           if (ipRule == null || !mounted) return;
+          setState(() => _creating = true);
           await repo.createFirewallIpRule(ipRule);
           ref.invalidate(firewallIpRulesProvider);
         case 2:
           final forward = await showFirewallForwardSheet(context);
           if (forward == null || !mounted) return;
+          setState(() => _creating = true);
           await repo.createFirewallForward(forward);
           ref.invalidate(firewallForwardsProvider);
       }
       if (!mounted) return;
-      showSnack(context, '创建成功');
+      showSuccessSnack(context, '规则已创建');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
+    } finally {
+      if (mounted && _creating) setState(() => _creating = false);
     }
   }
 
@@ -130,12 +142,13 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
       appBar: AppBar(
         title: const Text('防火墙'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新当前分页',
             icon: const Icon(Icons.refresh),
             onPressed: _refreshCurrentTab,
           ),
           PopupMenuButton<String>(
+            tooltip: '更多防火墙操作',
             onSelected: (value) async {
               switch (value) {
                 case 'scan':
@@ -191,8 +204,13 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
                   color: Theme.of(context).colorScheme.error,
                 ),
                 title: const Text('系统防火墙'),
-                subtitle: Text(errorMessage(error)),
-                trailing: IconButton(
+                subtitle: Text(
+                  describeError(error),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: A11yIconButton(
+                  tooltip: '重新获取防火墙状态',
                   icon: const Icon(Icons.refresh),
                   onPressed: () => ref.invalidate(firewallStatusProvider),
                 ),
@@ -220,9 +238,15 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _create,
-        icon: const Icon(Icons.add),
-        label: Text(_fabLabel),
+        onPressed: _creating ? null : _create,
+        icon: _creating
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.add),
+        label: Text(_creating ? '创建中…' : _fabLabel),
       ),
     );
   }
@@ -264,10 +288,10 @@ class _PortRuleTabState extends ConsumerState<_PortRuleTab> {
       await ref.read(securityRepoProvider).deleteFirewallRule(rule);
       ref.invalidate(firewallRulesProvider);
       if (!mounted) return;
-      showSnack(context, '已删除');
+      showSuccessSnack(context, '端口规则已删除');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyKey = null);
     }
@@ -302,7 +326,7 @@ class _PortRuleTabState extends ConsumerState<_PortRuleTab> {
           await notifier.refresh();
         } catch (e) {
           if (!context.mounted) return;
-          showSnack(context, errorMessage(e), error: true);
+          showErrorSnack(context, e);
         }
       },
       itemBuilder: (context, rule, index) {
@@ -341,6 +365,8 @@ class _PortRuleTabState extends ConsumerState<_PortRuleTab> {
             '${FirewallLabels.direction(rule.direction)} · '
             '${FirewallLabels.family(rule.family)} · '
             '来源 ${rule.address.isEmpty ? '不限' : rule.address}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           trailing: busy
               ? const SizedBox(
@@ -349,6 +375,7 @@ class _PortRuleTabState extends ConsumerState<_PortRuleTab> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : PopupMenuButton<String>(
+                  tooltip: '端口规则操作',
                   onSelected: (value) {
                     switch (value) {
                       case 'usage':
@@ -402,10 +429,10 @@ class _IpRuleTabState extends ConsumerState<_IpRuleTab> {
       await ref.read(securityRepoProvider).deleteFirewallIpRule(rule);
       ref.invalidate(firewallIpRulesProvider);
       if (!mounted) return;
-      showSnack(context, '已删除');
+      showSuccessSnack(context, 'IP 规则已删除');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyKey = null);
     }
@@ -428,7 +455,7 @@ class _IpRuleTabState extends ConsumerState<_IpRuleTab> {
           await notifier.refresh();
         } catch (e) {
           if (!context.mounted) return;
-          showSnack(context, errorMessage(e), error: true);
+          showErrorSnack(context, e);
         }
       },
       itemBuilder: (context, rule, index) {
@@ -440,12 +467,18 @@ class _IpRuleTabState extends ConsumerState<_IpRuleTab> {
             accept ? Icons.verified_user_outlined : Icons.block,
             color: accept ? theme.colorScheme.primary : theme.colorScheme.error,
           ),
-          title: Text(rule.address.isEmpty ? '(未指定地址)' : rule.address),
+          title: Text(
+            rule.address.isEmpty ? '(未指定地址)' : rule.address,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           subtitle: Text(
             '${FirewallLabels.direction(rule.direction)} · '
             '${FirewallLabels.protocol(rule.protocol)} · '
             '${FirewallLabels.family(rule.family)} · '
             '${FirewallLabels.strategy(rule.strategy)}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           trailing: busy
               ? const SizedBox(
@@ -453,8 +486,8 @@ class _IpRuleTabState extends ConsumerState<_IpRuleTab> {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : IconButton(
-                  tooltip: '删除',
+              : A11yIconButton(
+                  tooltip: '删除 ${rule.address} 的 IP 规则',
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _delete(rule),
                 ),
@@ -497,10 +530,10 @@ class _ForwardTabState extends ConsumerState<_ForwardTab> {
       await ref.read(securityRepoProvider).deleteFirewallForward(forward);
       ref.invalidate(firewallForwardsProvider);
       if (!mounted) return;
-      showSnack(context, '已删除');
+      showSuccessSnack(context, '端口转发已删除');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyKey = null);
     }
@@ -523,7 +556,7 @@ class _ForwardTabState extends ConsumerState<_ForwardTab> {
           await notifier.refresh();
         } catch (e) {
           if (!context.mounted) return;
-          showSnack(context, errorMessage(e), error: true);
+          showErrorSnack(context, e);
         }
       },
       itemBuilder: (context, forward, index) {
@@ -533,6 +566,8 @@ class _ForwardTabState extends ConsumerState<_ForwardTab> {
           leading: Icon(Icons.alt_route, color: theme.colorScheme.primary),
           title: Text(
             '${forward.port} → ${forward.targetIp}:${forward.targetPort}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           subtitle: Text('协议 ${FirewallLabels.protocol(forward.protocol)}'),
           trailing: busy
@@ -541,8 +576,8 @@ class _ForwardTabState extends ConsumerState<_ForwardTab> {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : IconButton(
-                  tooltip: '删除',
+              : A11yIconButton(
+                  tooltip: '删除 ${forward.port} 的端口转发',
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _delete(forward),
                 ),

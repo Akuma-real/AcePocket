@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/db_types.dart';
@@ -101,11 +102,11 @@ class _RedisKeySheetState extends ConsumerState<RedisKeySheet> {
   Future<void> _submit() async {
     final key = _key.text.trim();
     if (key.isEmpty) {
-      showMessage(context, '请填写键名', error: true);
+      showErrorSnack(context, '请填写键名');
       return;
     }
     if (_value.text.isEmpty) {
-      showMessage(context, '请填写值', error: true);
+      showErrorSnack(context, '请填写值');
       return;
     }
     final ttl = int.tryParse(_ttl.text.trim()) ?? 0;

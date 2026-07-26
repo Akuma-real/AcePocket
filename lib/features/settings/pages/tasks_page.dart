@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -46,12 +47,15 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     }
   }
 
-  void _toast(String message) {
+  void _ok(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    showSuccessSnack(context, message);
   }
 
-  String _errorText(Object e) => e is ApiException ? e.message : '$e';
+  void _fail(Object error) {
+    if (!mounted) return;
+    showErrorSnack(context, error);
+  }
 
   Future<void> _refreshAll() async {
     ref.invalidate(taskRunningProvider);
@@ -59,45 +63,48 @@ class _TasksPageState extends ConsumerState<TasksPage> {
   }
 
   Future<void> _cancel(TaskItem task) async {
+    if (_busy) return;
     final ok = await showConfirmDialog(
       context,
       title: '取消任务',
       content: '确定要取消任务「${task.name.isEmpty ? '#${task.id}' : task.name}」吗？'
           '\n面板会尝试终止正在执行的操作，可能导致该操作处于中间状态。',
       confirmText: '取消任务',
+      cancelText: '继续执行',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(taskRepoProvider).cancel(task.id);
       await _refreshAll();
-      _toast('已发送取消请求');
+      _ok('已发送取消请求');
     } catch (e) {
-      _toast('取消失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _delete(TaskItem task) async {
+    if (_busy) return;
     final ok = await showConfirmDialog(
       context,
       title: '删除任务',
       content: '确定要删除任务「${task.name.isEmpty ? '#${task.id}' : task.name}」的记录吗？',
-      confirmText: '删除',
+      confirmText: '删除记录',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(taskRepoProvider).delete(task.id);
       await _refreshAll();
-      _toast('任务记录已删除');
+      _ok('任务记录已删除');
     } catch (e) {
-      _toast('删除失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -113,8 +120,8 @@ class _TasksPageState extends ConsumerState<TasksPage> {
       appBar: AppBar(
         title: const Text('任务中心'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新任务列表',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(taskRunningProvider);
@@ -183,7 +190,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
                     try {
                       await _refreshAll();
                     } catch (e) {
-                      _toast('刷新失败：${_errorText(e)}');
+                      _fail(e);
                     }
                   },
                   child: ListView.builder(

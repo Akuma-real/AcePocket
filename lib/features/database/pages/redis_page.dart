@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -81,7 +83,7 @@ class _RedisPageState extends ConsumerState<RedisPage> {
     if (input == null || !mounted) return;
     final ttl = int.tryParse(input.trim());
     if (ttl == null) {
-      showMessage(context, '请输入合法的秒数', error: true);
+      showErrorSnack(context, '请输入合法的秒数，0 或负数表示永不过期');
       return;
     }
 
@@ -106,7 +108,15 @@ class _RedisPageState extends ConsumerState<RedisPage> {
       initialValue: kv.key,
     );
     if (newKey == null || !mounted) return;
-    if (newKey.isEmpty || newKey == kv.key) return;
+    if (newKey.isEmpty) {
+      // 原来静默返回，用户以为改名成功了却什么也没发生。
+      showErrorSnack(context, '请填写新键名');
+      return;
+    }
+    if (newKey == kv.key) {
+      showInfoSnack(context, '新键名与原键名相同，未做修改');
+      return;
+    }
 
     final ok = await runGuarded(
       context,
@@ -194,8 +204,8 @@ class _RedisPageState extends ConsumerState<RedisPage> {
         title: const Text('Redis 管理'),
         actions: [
           if (query != null)
-            IconButton(
-              tooltip: '清空当前数据库',
+            A11yIconButton(
+              tooltip: '清空当前数据库的全部键值',
               onPressed: () => _clearDb(query),
               icon: const Icon(Icons.delete_sweep_outlined),
             ),
@@ -293,18 +303,23 @@ class _RedisPageState extends ConsumerState<RedisPage> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   labelText: '搜索键名',
-                  hintText: '支持 * 通配，如 user:*',
+                  hintText: '支持 * 通配，如 user:*，回车搜索',
                   prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _search.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: '清除',
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _search = '');
-                          },
-                        ),
+                  // 监听输入框本身：只看已提交的 _search 会导致用户刚输入
+                  // 还没回车时看不到清除按钮。
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _searchController,
+                    builder: (context, value, _) => value.text.isEmpty
+                        ? const SizedBox.shrink()
+                        : A11yIconButton(
+                            tooltip: '清除搜索词',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _search = '');
+                            },
+                          ),
+                  ),
                 ),
                 onSubmitted: (value) => setState(() => _search = value.trim()),
               ),

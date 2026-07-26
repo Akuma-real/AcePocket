@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../../../core/widgets/section_card.dart';
@@ -41,7 +43,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
     try {
       await action();
     } catch (e) {
-      if (mounted) showSnack(context, errorMessage(e), error: true);
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyUserId = null);
     }
@@ -59,7 +61,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
             email: form.email,
           );
       await ref.read(panelUsersProvider.notifier).refresh();
-      if (mounted) showSnack(context, '用户 ${form.username} 已创建');
+      if (mounted) showSuccessSnack(context, '用户 ${form.username} 已创建');
     });
   }
 
@@ -78,7 +80,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
       ref
           .read(panelUsersProvider.notifier)
           .replace(user.copyWith(username: username));
-      if (mounted) showSnack(context, '用户名已修改');
+      if (mounted) showSuccessSnack(context, '用户名已修改');
     });
   }
 
@@ -97,7 +99,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
       ref
           .read(panelUsersProvider.notifier)
           .replace(user.copyWith(email: email));
-      if (mounted) showSnack(context, '邮箱已修改');
+      if (mounted) showSuccessSnack(context, '邮箱已修改');
     });
   }
 
@@ -111,17 +113,20 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
     await _run(user.id, () async {
       await ref.read(panelUserRepoProvider).updatePassword(user.id, password);
       if (mounted) {
-        showSnack(context, '密码已修改，若该账号用于 App 的实时功能请同步更新服务器配置');
+        showSuccessSnack(context, '密码已修改，若该账号用于 App 的实时功能请同步更新服务器配置');
       }
     });
   }
 
-  Future<void> _deleteUser(PanelUser user) async {
+  Future<void> _deleteUser(PanelUser user, {required bool isCurrent}) async {
     final confirmed = await showConfirmDialog(
       context,
       title: '删除用户 ${user.displayName}？',
       content: '删除后该用户的 API 令牌与通行密钥一并失效，且无法恢复。'
-          '面板不允许删除最后一个用户。',
+          '面板不允许删除最后一个用户。'
+          // 删掉令牌归属用户 = 当场把自己踢下线，必须说明白。
+          '${isCurrent ? '\n\n注意：这是本 App 当前 API 令牌的归属用户，删除后 App 将立即无法访问该面板，'
+              '需要用其他用户重新签发令牌。' : ''}',
       confirmText: '删除',
       danger: true,
     );
@@ -129,7 +134,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
     await _run(user.id, () async {
       await ref.read(panelUserRepoProvider).delete(user.id);
       await ref.read(panelUsersProvider.notifier).refresh();
-      if (mounted) showSnack(context, '用户已删除');
+      if (mounted) showSuccessSnack(context, '用户已删除');
     });
   }
 
@@ -144,7 +149,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
       ref
           .read(panelUsersProvider.notifier)
           .replace(user.copyWith(twoFaSecret: secret));
-      if (mounted) showSnack(context, '两步验证已开启');
+      if (mounted) showSuccessSnack(context, '两步验证已开启');
       return;
     }
 
@@ -161,7 +166,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
       ref
           .read(panelUsersProvider.notifier)
           .replace(user.copyWith(twoFaSecret: ''));
-      if (mounted) showSnack(context, '两步验证已关闭');
+      if (mounted) showSuccessSnack(context, '两步验证已关闭');
     });
   }
 
@@ -180,13 +185,13 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
       appBar: AppBar(
         title: const Text('面板用户'),
         actions: [
-          IconButton(
-            tooltip: '通行密钥',
+          A11yIconButton(
+            tooltip: '管理通行密钥',
             icon: const Icon(Icons.fingerprint_rounded),
             onPressed: () => context.push('/panel-users/passkey'),
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新用户列表',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(panelUsersProvider);
@@ -216,7 +221,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
                 } catch (e) {
                   // 用 State.context（而非 build 的参数）配合 State.mounted，避免跨异步间隙误用。
                   if (mounted) {
-                    showSnack(this.context, errorMessage(e), error: true);
+                    showErrorSnack(this.context, e);
                   }
                 }
               },
@@ -225,6 +230,7 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
               onRetry: () => ref.invalidate(panelUsersProvider),
               emptyMessage: '暂无面板用户',
               emptyIcon: Icons.person_outline,
+              totalLabel: (total) => '共 $total 个用户',
               itemBuilder: (context, user, index) => _UserCard(
                 user: user,
                 isCurrent: currentUser != null && currentUser.id == user.id,
@@ -232,7 +238,10 @@ class _PanelUsersPageState extends ConsumerState<PanelUsersPage> {
                 onRename: () => _renameUser(user),
                 onChangeEmail: () => _changeEmail(user),
                 onChangePassword: () => _changePassword(user),
-                onDelete: () => _deleteUser(user),
+                onDelete: () => _deleteUser(
+                  user,
+                  isCurrent: currentUser != null && currentUser.id == user.id,
+                ),
                 onToggleTwoFa: (value) => _toggleTwoFa(user, value),
                 onPasskeys: () => _openPasskeys(user),
               ),
@@ -403,10 +412,10 @@ class _UserCard extends StatelessWidget {
                   ],
                 ),
               ),
+              // 进度指示器与「更多操作」按钮占同样的 48dp 见方，避免行内跳动。
               if (busy)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: SizedBox(
+                minTouchTarget(
+                  child: const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
@@ -484,20 +493,25 @@ class _UserCard extends StatelessWidget {
             ],
           ),
           const Divider(height: 20),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('两步验证'),
-            subtitle: Text(
-              user.twoFaEnabled ? '已开启（登录需动态验证码）' : '未开启',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: user.twoFaEnabled
-                    ? colorScheme.primary
-                    : colorScheme.onSurfaceVariant,
+          // 列表里每张卡片都有一个「两步验证」开关，读屏只念「两步验证」无法
+          // 分辨改的是哪个用户；补上用户名（开 / 关状态由 Switch 自己播报）。
+          a11ySwitch(
+            label: '${user.displayName} 的两步验证',
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('两步验证'),
+              subtitle: Text(
+                user.twoFaEnabled ? '已开启（登录需动态验证码）' : '未开启',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: user.twoFaEnabled
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
               ),
+              value: user.twoFaEnabled,
+              onChanged: busy ? null : onToggleTwoFa,
             ),
-            value: user.twoFaEnabled,
-            onChanged: busy ? null : onToggleTwoFa,
           ),
           Row(
             children: [

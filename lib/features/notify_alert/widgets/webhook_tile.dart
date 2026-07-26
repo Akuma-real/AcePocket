@@ -75,7 +75,9 @@ class WebHookTile extends StatelessWidget {
                     )
                   else
                     PopupMenuButton<String>(
-                      tooltip: '更多操作',
+                      tooltip:
+                          '${webhook.name.isEmpty ? '未命名 WebHook' : webhook.name}'
+                          ' 的更多操作',
                       onSelected: (value) {
                         switch (value) {
                           case 'edit':

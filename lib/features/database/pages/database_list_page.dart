@@ -105,7 +105,7 @@ class _DatabaseListPageState extends ConsumerState<DatabaseListPage> {
               onChanged: (value) => setState(() => _type = value),
             ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '打开更多数据库管理入口',
             onSelected: (value) => context.push(value),
             itemBuilder: (context) => const [
               PopupMenuItem(
@@ -184,13 +184,26 @@ class _DatabaseListPageState extends ConsumerState<DatabaseListPage> {
       onLoadMore: () => _notifier.loadMore(),
       onRetry: () => ref.invalidate(databaseListProvider(_type)),
       emptyMessage: _type.isEmpty
-          ? '暂无数据库\n可先在「数据库服务器」中添加服务器'
-          : '暂无 ${dbTypeLabel(_type)} 数据库',
+          ? '还没有数据库\n创建数据库前，需要先添加一台数据库服务器（MySQL / PostgreSQL 等）'
+          : '暂无 ${dbTypeLabel(_type)} 数据库\n可在右上角切换筛选查看其他类型',
       emptyIcon: Icons.storage_outlined,
-      emptyAction: FilledButton.icon(
-        onPressed: _create,
-        icon: const Icon(Icons.add),
-        label: const Text('创建数据库'),
+      // 空态给两步指引：没有服务器时点「创建数据库」只会看到「无可用服务器」，
+      // 因此把「添加数据库服务器」也放进空态。
+      emptyAction: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.icon(
+            onPressed: _create,
+            icon: const Icon(Icons.add),
+            label: const Text('创建数据库'),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () => context.push('/databases/servers'),
+            icon: const Icon(Icons.dns_outlined),
+            label: const Text('管理数据库服务器'),
+          ),
+        ],
       ),
       itemBuilder: (context, database, index) => DatabaseTile(
         database: database,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/container_compose.dart';
 import '../models/json_utils.dart';
 import '../providers/container_providers.dart';
@@ -55,8 +56,8 @@ class ComposeListPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('编排管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新编排列表',
             icon: const Icon(Icons.refresh),
             onPressed: () =>
                 ref.read(containerComposesProvider.notifier).reload(),
@@ -167,14 +168,14 @@ class _ComposeTile extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: '启动',
+                  A11yIconButton(
+                    tooltip: '启动编排 ${compose.name}',
                     icon: const Icon(Icons.play_arrow_outlined),
                     visualDensity: VisualDensity.compact,
                     onPressed: () => onAction(_ComposeMenu.up),
                   ),
                   PopupMenuButton<_ComposeMenu>(
-                    tooltip: '更多操作',
+                    tooltip: '${compose.name} 的更多操作',
                     icon: const Icon(Icons.more_vert),
                     onSelected: onAction,
                     itemBuilder: (context) => [

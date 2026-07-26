@@ -1,4 +1,5 @@
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_exception.dart';
 import '../models/backup_storage.dart';
 import '../models/page_result.dart';
 
@@ -29,7 +30,7 @@ class BackupStorageRepo {
   Future<BackupStorage> get(int id) async {
     final data = await _api.get('/backup_storage/$id');
     if (data is Map<String, dynamic>) return BackupStorage.fromJson(data);
-    throw StateError('备份存储详情响应格式异常');
+    throw const ApiException('备份存储详情响应格式异常');
   }
 
   Future<void> create({

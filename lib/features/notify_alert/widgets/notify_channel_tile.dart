@@ -71,7 +71,8 @@ class NotifyChannelTile extends StatelessWidget {
                     )
                   else
                     PopupMenuButton<String>(
-                      tooltip: '更多操作',
+                      tooltip: '${channel.name.isEmpty ? '未命名渠道' : channel.name}'
+                          ' 的更多操作',
                       onSelected: (value) {
                         switch (value) {
                           case 'edit':
@@ -107,7 +108,7 @@ class NotifyChannelTile extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
-                  smtp == null
+                  smtp == null || smtp.to.isEmpty
                       ? notifyTypeLabel(channel.type)
                       : '收件人：${channel.summary}',
                   style: theme.textTheme.bodyMedium?.copyWith(

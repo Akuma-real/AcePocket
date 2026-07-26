@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/file_item.dart';
@@ -77,18 +79,15 @@ class _FilePropertySheetState extends ConsumerState<FilePropertySheet> {
             ),
           ),
           if (copyable)
-            IconButton(
+            A11yIconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              tooltip: '复制',
+              tooltip: '复制$label',
               icon: const Icon(Icons.copy_all_outlined),
               onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
                 await Clipboard.setData(ClipboardData(text: value));
                 if (!mounted) return;
-                messenger.showSnackBar(
-                  const SnackBar(content: Text('已复制到剪贴板')),
-                );
+                showSuccessSnack(context, '$label已复制到剪贴板');
               },
             ),
         ],

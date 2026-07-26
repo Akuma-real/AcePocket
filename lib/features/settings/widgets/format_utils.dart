@@ -1,5 +1,10 @@
 import 'package:intl/intl.dart';
 
+// 字节格式化统一走 core（`lib/core/utils/format.dart`），本模块曾复制过一份
+// 实现；core 版本对 NaN / Infinity / 负数 / 0<x<1 均有兜底，行为完全覆盖旧实现
+// （B 档取整、KB 及以上两位小数），故此处直接转出，不再重复实现。
+export '../../../core/utils/format.dart' show formatBytes;
+
 final DateFormat _dateTimeFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
 final DateFormat _dateFormat = DateFormat('yyyy-MM-dd');
 
@@ -23,18 +28,4 @@ String formatRelativeToNow(DateTime time) {
     value = '${abs.inMinutes} 分钟';
   }
   return diff.isNegative ? '已过期 $value' : '$value后过期';
-}
-
-/// 字节数格式化（日志文件大小）。
-String formatBytes(int bytes) {
-  if (bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  var value = bytes.toDouble();
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  final text = unit == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
-  return '$text ${units[unit]}';
 }

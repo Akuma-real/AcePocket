@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/backup_file.dart';
+import '../models/page_result.dart';
 import '../repo/backup_repo.dart';
 import '../repo/backup_transfer.dart';
 import 'options_providers.dart';
@@ -20,7 +22,7 @@ final backupRepoProvider = Provider<BackupRepo>((ref) {
 final backupUploaderProvider = Provider<BackupUploader>((ref) {
   final server = ref.watch(activeServerProvider);
   if (server == null) {
-    throw StateError('尚未选择服务器');
+    throw const ApiException('尚未选择服务器，请先在「服务器」中添加并选中一台服务器');
   }
   return BackupUploader(server);
 });
@@ -34,49 +36,20 @@ final backupListProvider = AsyncNotifierProvider.autoDispose
         BackupListNotifier.new);
 
 class BackupListNotifier
-    extends AutoDisposeFamilyAsyncNotifier<PagedState<BackupFile>, String> {
+    extends CronBackupPagedFamilyNotifier<BackupFile, String> {
   @override
-  Future<PagedState<BackupFile>> build(String arg) async {
-    final repo = ref.watch(backupRepoProvider);
-    final result =
-        await repo.list(type: arg, page: 1, limit: kBackupPageSize);
-    return PagedState(items: result.items, total: result.total, page: 1);
+  int get pageSize => kBackupPageSize;
+
+  @override
+  Future<PagedState<BackupFile>> build(String arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(backupRepoProvider);
+    return super.build(arg);
   }
 
-  Future<void> refresh() async {
-    final repo = ref.read(backupRepoProvider);
-    state = await AsyncValue.guard(() async {
-      final result =
-          await repo.list(type: arg, page: 1, limit: kBackupPageSize);
-      return PagedState<BackupFile>(
-        items: result.items,
-        total: result.total,
-        page: 1,
-      );
-    });
-  }
-
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final repo = ref.read(backupRepoProvider);
-      final next = current.page + 1;
-      final result =
-          await repo.list(type: arg, page: next, limit: kBackupPageSize);
-      final merged = [...current.items, ...result.items];
-      state = AsyncData(PagedState<BackupFile>(
-        items: merged,
-        // 空页即视为到底，避免 total 与实际条数不一致时反复触发「加载更多」。
-        total: result.items.isEmpty ? merged.length : result.total,
-        page: next,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-      rethrow;
-    }
-  }
+  @override
+  Future<PageResult<BackupFile>> fetch(int page, int limit) =>
+      ref.read(backupRepoProvider).list(type: arg, page: page, limit: limit);
 
   /// 删除备份文件（成功后从列表移除）。
   Future<void> delete(BackupFile file) async {

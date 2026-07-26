@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
+import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/website.dart';
 import '../providers/website_providers.dart';
 import '../widgets/delete_website_dialog.dart';
-import '../widgets/snack.dart';
 import '../widgets/website_list_tile.dart';
 
 /// 网站列表页 `/websites`。
@@ -80,9 +83,23 @@ class _WebsiteListPageState extends ConsumerState<WebsiteListPage> {
   }
 
   Future<void> _toggleStatus(Website website, bool status) async {
+    // 停用会让线上站点立刻返回停止页，误触代价高（列表里的开关很容易被划到），
+    // 因此只对「停用」方向做二次确认；启用无破坏性，保持一步到位。
+    if (!status) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '停用网站',
+        content: '停用后访问「${website.name}」将返回停止页，直到重新启用。确定停用吗？',
+        confirmText: '停用',
+        danger: true,
+      );
+      if (!ok || !mounted) return;
+    }
     await _runBusy(website.id, () async {
       await ref.read(websiteRepoProvider).updateStatus(website.id, status);
-      if (mounted) showSnack(context, status ? '已启用网站' : '已停用网站');
+      if (mounted) {
+        showSuccessSnack(context, status ? '已启用网站' : '已停用网站');
+      }
       await _reloadQuietly();
     });
   }
@@ -97,7 +114,7 @@ class _WebsiteListPageState extends ConsumerState<WebsiteListPage> {
             deletePath: options.deletePath,
             deleteDb: options.deleteDb,
           );
-      if (mounted) showSnack(context, '已删除网站 ${website.name}');
+      if (mounted) showSuccessSnack(context, '已删除网站 ${website.name}');
       ref.read(websiteListProvider.notifier).removeItem(website.id);
       await _reloadQuietly();
     });
@@ -142,13 +159,13 @@ class _WebsiteListPageState extends ConsumerState<WebsiteListPage> {
       appBar: AppBar(
         title: const Text('网站'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新网站列表',
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '网站列表的更多操作',
             onSelected: (value) async {
               switch (value) {
                 case 'settings':
@@ -290,8 +307,10 @@ class _ListFooter extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              '$error',
+              '加载更多失败：${describeError(error!)}',
               textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             ),
@@ -299,7 +318,7 @@ class _ListFooter extends StatelessWidget {
             TextButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('重试'),
+              label: const Text('重新加载'),
             ),
           ],
         ),

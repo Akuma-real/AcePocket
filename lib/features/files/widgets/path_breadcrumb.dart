@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/file_item.dart';
 
 /// 路径面包屑：横向滚动展示各级目录，点击跳转；右侧提供「输入路径」入口。
@@ -38,12 +39,16 @@ class PathBreadcrumb extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             child: segment.$2 == '/'
-                ? Icon(
-                    Icons.storage_outlined,
-                    size: 18,
-                    color: isLast
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
+                ? Tooltip(
+                    // 纯图标的根目录节点对读屏是匿名的，补上名称。
+                    message: '根目录 /',
+                    child: Icon(
+                      Icons.storage_outlined,
+                      size: 18,
+                      color: isLast
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
                   )
                 : Text(
                     segment.$1,
@@ -85,8 +90,8 @@ class PathBreadcrumb extends StatelessWidget {
             ),
           ),
           if (onEditPath != null)
-            IconButton(
-              tooltip: '输入路径',
+            A11yIconButton(
+              tooltip: '手动输入路径跳转',
               iconSize: 20,
               icon: const Icon(Icons.edit_location_alt_outlined),
               onPressed: onEditPath,

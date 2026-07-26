@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/website.dart';
 import '../models/website_default_config.dart';
 import '../providers/website_providers.dart';
-import '../widgets/snack.dart';
 
 /// 网站默认设置页 `/websites/settings`。
 ///
@@ -28,8 +31,8 @@ class WebsiteSettingsPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('网站默认设置'),
         actions: [
-          IconButton(
-            tooltip: '重新加载',
+          A11yIconButton(
+            tooltip: '重新加载默认设置',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(websiteDefaultConfigProvider);
@@ -75,8 +78,16 @@ class _DefaultConfigFormState extends ConsumerState<_DefaultConfigForm> {
   bool _saving = false;
   bool _savingDefaultSite = false;
 
+  /// 页面内容（三段 HTML + TLS 版本）是否有未保存的修改。
+  bool _dirty = false;
+
   /// 默认站点下拉框的当前选中值（null 表示尚未加载）。
   int? _defaultSite;
+
+  void _markDirty() {
+    if (_dirty) return;
+    setState(() => _dirty = true);
+  }
 
   @override
   void dispose() {
@@ -88,15 +99,15 @@ class _DefaultConfigFormState extends ConsumerState<_DefaultConfigForm> {
 
   Future<void> _save() async {
     if (_index.text.trim().isEmpty) {
-      showSnack(context, '默认首页内容不能为空', error: true);
+      showErrorSnack(context, '默认首页内容不能为空');
       return;
     }
     if (_stop.text.trim().isEmpty) {
-      showSnack(context, '停止页内容不能为空', error: true);
+      showErrorSnack(context, '停止页内容不能为空');
       return;
     }
     if (_tlsVersions.isEmpty) {
-      showSnack(context, '至少需要选择一个 TLS 版本', error: true);
+      showErrorSnack(context, '至少需要选择一个 TLS 版本');
       return;
     }
 
@@ -112,7 +123,8 @@ class _DefaultConfigFormState extends ConsumerState<_DefaultConfigForm> {
           );
       ref.invalidate(websiteDefaultConfigProvider);
       if (!mounted) return;
-      showSnack(context, '默认配置已保存，Web 服务器已重载');
+      setState(() => _dirty = false);
+      showSuccessSnack(context, '默认配置已保存，Web 服务器已重载');
     } catch (e) {
       if (!mounted) return;
       showErrorSnack(context, e);
@@ -145,7 +157,7 @@ class _DefaultConfigFormState extends ConsumerState<_DefaultConfigForm> {
       await ref.read(websiteRepoProvider).updateDefaultSite(target);
       ref.invalidate(websiteDefaultSiteProvider);
       if (!mounted) return;
-      showSnack(context, '默认站点已更新为 $name');
+      showSuccessSnack(context, '默认站点已更新为 $name');
     } catch (e) {
       if (!mounted) return;
       showErrorSnack(context, e);
@@ -160,123 +172,138 @@ class _DefaultConfigFormState extends ConsumerState<_DefaultConfigForm> {
     final envAsync = ref.watch(installedEnvironmentProvider);
     final isNginx = envAsync.valueOrNull?.isNginx ?? true;
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        final ok = await showConfirmDialog(
-          context,
-          title: '重新加载',
-          content: '重新从面板拉取默认配置将丢弃当前未保存的修改，是否继续？',
-          confirmText: '重新加载',
-        );
-        if (!ok) return;
-        ref.invalidate(websiteDefaultConfigProvider);
-        ref.invalidate(websiteDefaultSiteProvider);
-        ref.invalidate(allWebsitesProvider);
-      },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 32),
-        children: [
-          SectionCard(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '这里的页面内容直接写入 Web 服务器根目录下的 index.html / '
-                    'stop.html / 404.html；默认 TLS 版本只影响新建的网站，'
-                    '已有网站不受影响。',
-                    style: theme.textTheme.bodySmall,
+    // 页面内容是三段整页 HTML，误触返回手势丢掉草稿的代价很高；
+    // PopScope 注册在所在路由上，放在 Scaffold 内部同样生效。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '默认页面内容或 TLS 版本尚未保存，返回后修改将丢失。确定放弃吗？',
+      child: RefreshIndicator(
+        onRefresh: () async {
+          if (_dirty) {
+            final ok = await showConfirmDialog(
+              context,
+              title: '重新加载',
+              content: '重新从面板拉取默认配置将丢弃当前未保存的修改，是否继续？',
+              confirmText: '重新加载',
+              cancelText: '继续编辑',
+            );
+            if (!ok) return;
+          }
+          ref.invalidate(websiteDefaultConfigProvider);
+          ref.invalidate(websiteDefaultSiteProvider);
+          ref.invalidate(allWebsitesProvider);
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
+            SectionCard(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: theme.colorScheme.primary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '这里的页面内容直接写入 Web 服务器根目录下的 index.html / '
+                      'stop.html / 404.html；默认 TLS 版本只影响新建的网站，'
+                      '已有网站不受影响。',
+                      style: theme.textTheme.bodySmall,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          _HtmlSection(
-            title: '默认首页（index.html）',
-            controller: _index,
-            hint: '<html>…</html>',
-          ),
-          _HtmlSection(
-            title: '网站停止页（stop.html）',
-            controller: _stop,
-            hint: '网站被停用时展示的页面',
-          ),
-          _HtmlSection(
-            title: '404 页面（404.html）',
-            controller: _notFound,
-            hint: '留空则不修改服务器上现有的 404.html',
-          ),
-          SectionCard(
-            title: '默认 TLS 版本',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final version in kWebsiteTlsVersions)
-                      FilterChip(
-                        label: Text(version.label),
-                        selected: _tlsVersions.contains(version.value),
-                        onSelected: (selected) => setState(() {
-                          if (selected) {
-                            if (!_tlsVersions.contains(version.value)) {
-                              _tlsVersions.add(version.value);
-                            }
-                          } else {
-                            _tlsVersions.remove(version.value);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'TLS 1.0 / 1.1 已不安全，除非有老旧客户端需要兼容，'
-                  '建议仅保留 TLS 1.2 与 TLS 1.3。',
+            _HtmlSection(
+              title: '默认首页（index.html）',
+              controller: _index,
+              hint: '<html>…</html>',
+              onChanged: _markDirty,
+            ),
+            _HtmlSection(
+              title: '网站停止页（stop.html）',
+              controller: _stop,
+              hint: '网站被停用时展示的页面',
+              onChanged: _markDirty,
+            ),
+            _HtmlSection(
+              title: '404 页面（404.html）',
+              controller: _notFound,
+              hint: '留空则不修改服务器上现有的 404.html',
+              onChanged: _markDirty,
+            ),
+            SectionCard(
+              title: '默认 TLS 版本',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final version in kWebsiteTlsVersions)
+                        FilterChip(
+                          label: Text(version.label),
+                          selected: _tlsVersions.contains(version.value),
+                          onSelected: (selected) {
+                            setState(() {
+                              if (selected) {
+                                if (!_tlsVersions.contains(version.value)) {
+                                  _tlsVersions.add(version.value);
+                                }
+                              } else {
+                                _tlsVersions.remove(version.value);
+                              }
+                            });
+                            _markDirty();
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'TLS 1.0 / 1.1 已不安全，除非有老旧客户端需要兼容，'
+                    '建议仅保留 TLS 1.2 与 TLS 1.3。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: FilledButton.icon(
+                onPressed: _saving ? null : _save,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? '保存中…' : '保存默认配置'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isNginx)
+              _DefaultSiteSection(
+                value: _defaultSite,
+                saving: _savingDefaultSite,
+                onChanged: (value) => setState(() => _defaultSite = value),
+                onSave: _saveDefaultSite,
+              )
+            else
+              SectionCard(
+                title: '默认站点',
+                child: Text(
+                  '当前 Web 服务器不是 nginx，面板不支持设置默认站点。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.save_outlined),
-              label: Text(_saving ? '保存中…' : '保存默认配置'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (isNginx)
-            _DefaultSiteSection(
-              value: _defaultSite,
-              saving: _savingDefaultSite,
-              onChanged: (value) => setState(() => _defaultSite = value),
-              onSave: _saveDefaultSite,
-            )
-          else
-            SectionCard(
-              title: '默认站点',
-              child: Text(
-                '当前 Web 服务器不是 nginx，面板不支持设置默认站点。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -288,11 +315,15 @@ class _HtmlSection extends StatelessWidget {
     required this.title,
     required this.controller,
     required this.hint,
+    required this.onChanged,
   });
 
   final String title;
   final TextEditingController controller;
   final String hint;
+
+  /// 内容变化回调（用于标记页面为「有未保存的修改」）。
+  final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -310,6 +341,7 @@ class _HtmlSection extends StatelessWidget {
           alignLabelWithHint: true,
           border: const OutlineInputBorder(),
         ),
+        onChanged: (_) => onChanged(),
       ),
     );
   }
@@ -355,13 +387,13 @@ class _DefaultSiteSection extends ConsumerWidget {
             const LinearProgressIndicator()
           else if (currentAsync.hasError)
             Text(
-              '读取默认站点失败：${errorMessage(currentAsync.error!)}',
+              '读取默认站点失败：${describeError(currentAsync.error!)}',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             )
           else if (websitesAsync.hasError)
             Text(
-              '读取网站列表失败：${errorMessage(websitesAsync.error!)}',
+              '读取网站列表失败：${describeError(websitesAsync.error!)}',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             )

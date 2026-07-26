@@ -31,6 +31,34 @@ class EsIndexTile extends StatelessWidget {
     }
   }
 
+  /// 健康状态文案：小圆点只用颜色表达状态，色觉障碍用户与读屏都取不到，
+  /// 因此额外给出中文说明（长按可见，TalkBack 会播报）。
+  String get _healthText {
+    switch (index.health) {
+      case 'green':
+        return '健康（全部分片可用）';
+      case 'yellow':
+        return '亚健康（副本分片未分配）';
+      case 'red':
+        return '异常（存在不可用的主分片）';
+      default:
+        return '健康状态未知';
+    }
+  }
+
+  /// 索引开闭状态的中文展示（面板原样返回 open / close）。
+  String get _statusText {
+    switch (index.status) {
+      case 'open':
+        return '已开启';
+      case 'close':
+      case 'closed':
+        return '已关闭';
+      default:
+        return index.status;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -42,7 +70,17 @@ class EsIndexTile extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Icon(Icons.circle, size: 12, color: _healthColor(context)),
+            child: Tooltip(
+              message: _healthText,
+              child: Semantics(
+                label: _healthText,
+                child: Icon(
+                  Icons.circle,
+                  size: 12,
+                  color: _healthColor(context),
+                ),
+              ),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -59,8 +97,7 @@ class EsIndexTile extends StatelessWidget {
                 const SizedBox(height: 6),
                 ChipRow(
                   children: [
-                    if (index.status.isNotEmpty)
-                      InfoChip(label: index.status),
+                    if (index.status.isNotEmpty) InfoChip(label: _statusText),
                     if (index.docsCount.isNotEmpty)
                       InfoChip(
                         label: '${index.docsCount} 文档',
@@ -151,14 +188,14 @@ class EsDocumentTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  document.id.isEmpty ? '(无 ID)' : document.id,
+                  document.id.isEmpty ? '未指定文档 ID' : document.id,
                   style: theme.textTheme.titleSmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  document.source,
+                  document.source.isEmpty ? '（文档内容为空）' : document.source,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     fontFamily: 'monospace',

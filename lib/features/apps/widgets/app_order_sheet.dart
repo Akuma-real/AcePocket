@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -30,6 +31,9 @@ class _AppOrderSheet extends ConsumerStatefulWidget {
 class _AppOrderSheetState extends ConsumerState<_AppOrderSheet> {
   List<AppItem>? _apps;
   Object? _error;
+
+  /// 保存失败的错误：只能在弹层内部展示（见 [_save] 注释）。
+  Object? _saveError;
   bool _loading = true;
   bool _saving = false;
 
@@ -75,17 +79,23 @@ class _AppOrderSheetState extends ConsumerState<_AppOrderSheet> {
     final repo = ref.read(appsRepoProvider);
     final apps = _apps;
     if (repo == null || apps == null) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
     try {
       await repo.updateOrder(apps.map((app) => app.slug).toList());
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存排序失败：$e')),
-      );
+      // 弹层内不能用 SnackBar：这里没有自己的 Scaffold，ScaffoldMessenger 解析到
+      // 应用级实例，SnackBar 会显示在模态弹层**下方**被完全遮挡，
+      // 用户得不到任何失败反馈。改为在弹层内部用错误条展示。
+      setState(() {
+        _saving = false;
+        _saveError = e;
+      });
     }
   }
 
@@ -171,6 +181,33 @@ class _AppOrderSheetState extends ConsumerState<_AppOrderSheet> {
               ),
             ),
             const Divider(height: 1),
+            if (_saveError != null)
+              Container(
+                width: double.infinity,
+                color: theme.colorScheme.errorContainer,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 20,
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '保存排序失败：${describeError(_saveError!)}',
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onErrorContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Row(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/json_utils.dart';
 import '../models/website_setting.dart';
 import 'kv_list_field.dart';
@@ -145,8 +146,8 @@ class _UpstreamCardState extends State<_UpstreamCard> {
                     },
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: u.name.isEmpty ? '删除这个上游' : '删除上游 ${u.name}',
                   color: theme.colorScheme.error,
                   onPressed: widget.onRemove,
                   icon: const Icon(Icons.remove_circle_outline),
@@ -177,6 +178,7 @@ class _UpstreamCardState extends State<_UpstreamCard> {
                       Expanded(
                         child: DropdownButtonFormField<String>(
                           initialValue: _algos.contains(u.algo) ? u.algo : '',
+                          isExpanded: true,
                           decoration:
                               const InputDecoration(labelText: '负载均衡算法'),
                           items: const [
@@ -361,8 +363,10 @@ class _ProxyCardState extends State<_ProxyCard> {
                     },
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: p.location.isEmpty
+                      ? '删除这条代理规则'
+                      : '删除代理规则 ${p.location}',
                   color: theme.colorScheme.error,
                   onPressed: widget.onRemove,
                   icon: const Icon(Icons.remove_circle_outline),
@@ -420,6 +424,7 @@ class _ProxyCardState extends State<_ProxyCard> {
                                   .contains(p.httpVersion)
                               ? p.httpVersion
                               : '1.1',
+                          isExpanded: true,
                           decoration:
                               const InputDecoration(labelText: 'HTTP 版本'),
                           items: const [

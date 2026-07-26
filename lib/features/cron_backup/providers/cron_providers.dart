@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
 import '../models/cron.dart';
+import '../models/page_result.dart';
 import '../repo/cron_repo.dart';
 import 'paged_state.dart';
 
@@ -18,48 +19,21 @@ final cronListProvider =
     AsyncNotifierProvider.autoDispose<CronListNotifier, PagedState<Cron>>(
         CronListNotifier.new);
 
-class CronListNotifier extends AutoDisposeAsyncNotifier<PagedState<Cron>> {
+class CronListNotifier extends CronBackupPagedNotifier<Cron> {
   @override
-  Future<PagedState<Cron>> build() async {
-    final repo = ref.watch(cronRepoProvider);
-    final result = await repo.list(page: 1, limit: kCronPageSize);
-    return PagedState(items: result.items, total: result.total, page: 1);
+  int get pageSize => kCronPageSize;
+
+  @override
+  Future<PagedState<Cron>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载
+    // （基类的 buildFirstPage 会让在途请求过期，旧服务器的响应不会写回）。
+    ref.watch(cronRepoProvider);
+    return super.build();
   }
 
-  /// 下拉刷新：重新加载第一页，不清空当前内容。
-  Future<void> refresh() async {
-    final repo = ref.read(cronRepoProvider);
-    state = await AsyncValue.guard(() async {
-      final result = await repo.list(page: 1, limit: kCronPageSize);
-      return PagedState<Cron>(
-        items: result.items,
-        total: result.total,
-        page: 1,
-      );
-    });
-  }
-
-  /// 加载下一页。失败时抛出异常由调用方提示。
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final repo = ref.read(cronRepoProvider);
-      final next = current.page + 1;
-      final result = await repo.list(page: next, limit: kCronPageSize);
-      final merged = [...current.items, ...result.items];
-      state = AsyncData(PagedState<Cron>(
-        items: merged,
-        // 空页即视为到底，避免 total 与实际条数不一致时反复触发「加载更多」。
-        total: result.items.isEmpty ? merged.length : result.total,
-        page: next,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-      rethrow;
-    }
-  }
+  @override
+  Future<PageResult<Cron>> fetch(int page, int limit) =>
+      ref.read(cronRepoProvider).list(page: page, limit: limit);
 
   /// 启用 / 停用任务（成功后就地更新列表项）。
   Future<void> setStatus(Cron cron, bool status) async {

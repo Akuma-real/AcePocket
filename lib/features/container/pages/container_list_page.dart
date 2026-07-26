@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/not_installed_view.dart';
 import '../models/container.dart';
@@ -88,13 +89,13 @@ class _ContainerListPageState extends ConsumerState<ContainerListPage> {
       appBar: AppBar(
         title: const Text('容器管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新容器列表',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.read(containersProvider.notifier).reload(),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '更多操作',
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
               switch (value) {
@@ -185,7 +186,8 @@ class _ContainerListPageState extends ConsumerState<ContainerListPage> {
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchController.text.isEmpty
                     ? null
-                    : IconButton(
+                    : A11yIconButton(
+                        tooltip: '清空搜索关键词',
                         icon: const Icon(Icons.clear),
                         onPressed: () {
                           _searchController.clear();

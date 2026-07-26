@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -65,24 +66,28 @@ class ContainerDetailPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(async.valueOrNull?.name.isNotEmpty == true
-            ? async.valueOrNull!.name
-            : '容器详情'),
+        title: Text(
+          async.valueOrNull?.name.isNotEmpty == true
+              ? async.valueOrNull!.name
+              : '容器详情',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           // 容器终端需要容器处于运行中（`/api/ws/container/<id>` 是 exec）。
           if (async.valueOrNull?.state.running == true)
-            IconButton(
-              tooltip: '容器终端',
+            A11yIconButton(
+              tooltip: '打开容器终端',
               icon: const Icon(Icons.terminal_rounded),
               onPressed: () => _openTerminal(context, async.value!),
             ),
-          IconButton(
-            tooltip: '实时日志',
+          A11yIconButton(
+            tooltip: '查看实时日志',
             icon: const Icon(Icons.subject_outlined),
             onPressed: () => context.push('/containers/$id/logs'),
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新容器详情',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(containerInspectProvider(id)),
           ),

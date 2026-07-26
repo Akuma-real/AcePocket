@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/database_server.dart';
 import '../models/db_types.dart';
 import '../providers/database_providers.dart';
+import '../utils/database_validation.dart';
 import 'db_feedback.dart';
 import 'db_sheet.dart';
 import 'server_dropdown.dart';
@@ -40,6 +42,8 @@ class _CreateDatabaseSheetState extends ConsumerState<CreateDatabaseSheet> {
   String _hostOption = 'localhost';
   bool _submitting = false;
   String? _nameError;
+  String? _usernameError;
+  String? _hostError;
 
   @override
   void dispose() {
@@ -60,15 +64,36 @@ class _CreateDatabaseSheetState extends ConsumerState<CreateDatabaseSheet> {
     final server = _server;
     final name = _name.text.trim();
     if (server == null) {
-      showMessage(context, '请先选择数据库服务器', error: true);
+      showErrorSnack(context, '请先选择数据库服务器');
       return;
     }
     if (!_namePattern.hasMatch(name)) {
       setState(() => _nameError = '数据库名只能包含字母、数字、下划线和短横线，且不能以数字开头');
       return;
     }
+    // 勾选了「同时创建数据库用户」时，用户名与密码是必填的：
+    // 原来直接提交，由面板返回英文校验错误，用户不知道该补哪个字段。
+    if (_createUser && dbTypeSupportsUser(server.type)) {
+      if (_username.text.trim().isEmpty) {
+        setState(() => _usernameError = '请填写要创建的数据库用户名');
+        return;
+      }
+      if (_password.text.isEmpty) {
+        showErrorSnack(context, '请填写数据库用户的密码');
+        return;
+      }
+      if (dbTypeUsesHost(server.type) && _hostOption == 'specific') {
+        final hostError = validateDbUserHost(_specificHost.text);
+        if (hostError != null) {
+          setState(() => _hostError = hostError);
+          return;
+        }
+      }
+    }
     setState(() {
       _nameError = null;
+      _usernameError = null;
+      _hostError = null;
       _submitting = true;
     });
 
@@ -169,7 +194,13 @@ class _CreateDatabaseSheetState extends ConsumerState<CreateDatabaseSheet> {
                 decoration: InputDecoration(
                   labelText: _createUser ? '用户名' : '授权用户（可留空）',
                   hintText: _createUser ? '如 my_app' : '留空则不授权任何用户',
+                  errorText: _usernameError,
                 ),
+                onChanged: (_) {
+                  if (_usernameError != null) {
+                    setState(() => _usernameError = null);
+                  }
+                },
               ),
               if (_createUser)
                 PasswordField(
@@ -188,17 +219,23 @@ class _CreateDatabaseSheetState extends ConsumerState<CreateDatabaseSheet> {
                         child: Text(option.$2),
                       ),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _hostOption = value ?? 'localhost'),
+                  onChanged: (value) => setState(() {
+                    _hostOption = value ?? 'localhost';
+                    _hostError = null;
+                  }),
                 ),
                 if (_hostOption == 'specific')
                   TextField(
                     controller: _specificHost,
                     autocorrect: false,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: '指定主机',
-                      hintText: '如 192.168.1.10',
+                      hintText: '如 192.0.2.10 或 192.0.2.%',
+                      errorText: _hostError,
                     ),
+                    onChanged: (_) {
+                      if (_hostError != null) setState(() => _hostError = null);
+                    },
                   ),
               ],
             ],

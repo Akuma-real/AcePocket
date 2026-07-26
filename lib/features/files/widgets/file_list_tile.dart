@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/file_item.dart';
 
 /// 文件 / 目录列表项。
@@ -102,8 +103,12 @@ class FileListTile extends StatelessWidget {
           ),
           if (item.immutable) ...[
             const SizedBox(width: 6),
-            Icon(Icons.lock_outline,
-                size: 14, color: theme.colorScheme.tertiary),
+            // Tooltip 同时提供长按提示与读屏播报，纯图标对盲用户不可见。
+            Tooltip(
+              message: '已加防篡改锁定（chattr +i）',
+              child: Icon(Icons.lock_outline,
+                  size: 14, color: theme.colorScheme.tertiary),
+            ),
           ],
           if (item.symlink) ...[
             const SizedBox(width: 6),
@@ -133,9 +138,10 @@ class FileListTile extends StatelessWidget {
       ),
       trailing: selectionMode
           ? null
-          : IconButton(
+          : A11yIconButton(
               icon: const Icon(Icons.more_vert),
-              tooltip: '更多操作',
+              // 读屏会连同列表项标题一起播报，这里点明操作对象。
+              tooltip: '${item.name} 的更多操作',
               onPressed: onMore,
             ),
     );

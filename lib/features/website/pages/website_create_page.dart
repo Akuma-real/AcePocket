@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/lv_option.dart';
 import '../providers/website_providers.dart';
-import '../widgets/snack.dart';
 import '../widgets/string_list_field.dart';
 
 /// 创建网站页 `/websites/create`。
@@ -41,6 +44,9 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
   String _dbType = '0';
   bool _submitting = false;
 
+  /// 是否已经填过内容（用于返回时确认放弃草稿）。
+  bool _dirty = false;
+
   static final _nameRegExp = RegExp(r'^[a-zA-Z0-9_-]+$');
   static final _dbIdentifierRegExp = RegExp(r'^[a-zA-Z_-][a-zA-Z0-9_-]*$');
 
@@ -58,6 +64,11 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
 
   bool get _useDb => _dbType != '0' && _dbType.isNotEmpty;
 
+  void _markDirty() {
+    if (_dirty) return;
+    setState(() => _dirty = true);
+  }
+
   /// 与面板前端一致：把网站名转换为合法的库名/用户名。
   String _formatDbValue(String value) {
     var v = value.replaceAll('.', '_').replaceAll('-', '_');
@@ -74,6 +85,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
   }
 
   void _onDbTypeChanged(String value) {
+    _markDirty();
     setState(() {
       _dbType = value;
       if (_useDb) {
@@ -96,34 +108,39 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
 
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (domains.isEmpty) {
-      showSnack(context, '请至少填写一个域名', error: true);
+      showErrorSnack(context, '请至少填写一个域名');
       return;
     }
     for (final domain in domains) {
       final error = validateDomain(domain);
       if (error != null) {
-        showSnack(context, '域名 $domain：$error', error: true);
+        showErrorSnack(context, '域名 $domain：$error');
         return;
       }
     }
     for (final listen in listens) {
       final error = validateListenAddress(listen);
       if (error != null) {
-        showSnack(context, '监听 $listen：$error', error: true);
+        showErrorSnack(context, '监听 $listen：$error');
         return;
       }
     }
     if (_type == 'php' && (_php == null || _php == 0)) {
-      showSnack(context, '请选择 PHP 版本', error: true);
+      showErrorSnack(context, '请选择 PHP 版本');
       return;
     }
 
     // 与面板前端一致：监听为空时补 80，且不允许在未配置证书时监听 443。
     if (listens.isEmpty) listens.add('80');
+    final dropped443 = listens.contains('443');
     listens.removeWhere((e) => e == '443');
     if (listens.isEmpty) {
-      showSnack(context, '监听端口不能只有 443，请先创建网站再配置 HTTPS', error: true);
+      showErrorSnack(context, '监听端口不能只有 443，请先创建网站再配置 HTTPS');
       return;
+    }
+    // 443 被静默丢弃过一次，用户会以为已经配好 HTTPS，这里明确告知。
+    if (dropped443) {
+      showInfoSnack(context, '已忽略 443 监听：创建后请在「HTTPS」分页启用并配置证书');
     }
 
     setState(() => _submitting = true);
@@ -144,7 +161,9 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
             proxy: _type == 'proxy' ? _proxyController.text.trim() : '',
           );
       if (!mounted) return;
-      showSnack(context, '网站创建成功');
+      // 草稿已落库，返回时不应再拦截。
+      setState(() => _dirty = false);
+      showSuccessSnack(context, '网站创建成功');
       ref.invalidate(websiteListProvider);
       context.pop(true);
     } catch (e) {
@@ -160,7 +179,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
     final envAsync = ref.watch(installedEnvironmentProvider);
     final env = envAsync.valueOrNull ?? InstalledEnvironment.empty;
 
-    return Scaffold(
+    final scaffold = Scaffold(
       appBar: AppBar(title: const Text('新建网站')),
       body: Form(
         key: _formKey,
@@ -176,8 +195,10 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                   ButtonSegment(value: 'static', label: Text('纯静态')),
                 ],
                 selected: {_type},
-                onSelectionChanged: (values) =>
-                    setState(() => _type = values.first),
+                onSelectionChanged: (values) {
+                  setState(() => _type = values.first);
+                  _markDirty();
+                },
               ),
             ),
             SectionCard(
@@ -203,6 +224,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                       }
                       return null;
                     },
+                    onChanged: (_) => _markDirty(),
                   ),
                   const SizedBox(height: 20),
                   StringListField(
@@ -213,7 +235,10 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     addButtonText: '添加域名',
                     helperText: '可填写多个域名，支持泛域名（如 *.example.com）',
                     validator: validateDomain,
-                    onChanged: (values) => _domains = values,
+                    onChanged: (values) {
+                      _domains = values;
+                      _markDirty();
+                    },
                   ),
                   const SizedBox(height: 12),
                   StringListField(
@@ -225,7 +250,10 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     keyboardType: TextInputType.text,
                     helperText: '如 80、0.0.0.0:80；443 需在创建后于 HTTPS 中配置',
                     validator: validateListenAddress,
-                    onChanged: (values) => _listens = values,
+                    onChanged: (values) {
+                      _listens = values;
+                      _markDirty();
+                    },
                   ),
                 ],
               ),
@@ -249,6 +277,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     }
                     return null;
                   },
+                  onChanged: (_) => _markDirty(),
                 ),
               )
             else
@@ -267,6 +296,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     if (!v.startsWith('/')) return '请填写绝对路径';
                     return null;
                   },
+                  onChanged: (_) => _markDirty(),
                 ),
               ),
             if (_type == 'php')
@@ -280,7 +310,8 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     else if (env.php.isEmpty)
                       Text(
                         envAsync.hasError
-                            ? '获取已安装 PHP 版本失败：${errorMessage(envAsync.error!)}'
+                            ? '获取已安装 PHP 版本失败：'
+                                '${describeError(envAsync.error!)}'
                             : '面板尚未安装任何 PHP 版本，请先在应用商店安装',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.error),
@@ -288,6 +319,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     else
                       DropdownButtonFormField<int>(
                         initialValue: _php,
+                        isExpanded: true,
                         decoration:
                             const InputDecoration(labelText: '选择 PHP 版本'),
                         items: [
@@ -297,7 +329,10 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                               child: Text(option.label),
                             ),
                         ],
-                        onChanged: (v) => setState(() => _php = v),
+                        onChanged: (v) {
+                          setState(() => _php = v);
+                          _markDirty();
+                        },
                       ),
                   ],
                 ),
@@ -312,6 +347,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                       initialValue: env.db.any((e) => e.value == _dbType)
                           ? _dbType
                           : '0',
+                      isExpanded: true,
                       decoration: const InputDecoration(labelText: '创建数据库'),
                       items: [
                         if (!env.db.any((e) => e.value == '0'))
@@ -344,6 +380,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                           }
                           return null;
                         },
+                        onChanged: (_) => _markDirty(),
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -359,17 +396,21 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                           }
                           return null;
                         },
+                        onChanged: (_) => _markDirty(),
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _dbPasswordController,
                         decoration: InputDecoration(
                           labelText: '数据库密码',
-                          suffixIcon: IconButton(
-                            tooltip: '随机生成',
+                          suffixIcon: A11yIconButton(
+                            tooltip: '随机生成数据库密码',
                             icon: const Icon(Icons.casino_outlined),
-                            onPressed: () => setState(() =>
-                                _dbPasswordController.text = _randomPassword()),
+                            onPressed: () {
+                              setState(() => _dbPasswordController.text =
+                                  _randomPassword());
+                              _markDirty();
+                            },
                           ),
                         ),
                         autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -378,6 +419,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                           if ((value ?? '').isEmpty) return '请填写数据库密码';
                           return null;
                         },
+                        onChanged: (_) => _markDirty(),
                       ),
                     ],
                   ],
@@ -393,6 +435,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                   hintText: '选填，便于识别该网站',
                   alignLabelWithHint: true,
                 ),
+                onChanged: (_) => _markDirty(),
               ),
             ),
             Padding(
@@ -412,6 +455,13 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
           ],
         ),
       ),
+    );
+
+    // 整张表单都是手填内容，侧滑返回 / 返回键会静默丢弃，返回前必须确认。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty && !_submitting,
+      message: '新建网站的内容尚未提交，返回后填写的内容将丢失。确定放弃吗？',
+      child: scaffold,
     );
   }
 }

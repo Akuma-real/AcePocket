@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/database_server.dart';
@@ -84,7 +85,7 @@ class _DatabaseUserSheetState extends ConsumerState<DatabaseUserSheet> {
     final server = _server;
     final username = _username.text.trim();
     if (server == null) {
-      showMessage(context, '请先选择数据库服务器', error: true);
+      showErrorSnack(context, '请先选择数据库服务器');
       return;
     }
     if (!_usernamePattern.hasMatch(username)) {
@@ -96,7 +97,7 @@ class _DatabaseUserSheetState extends ConsumerState<DatabaseUserSheet> {
       return;
     }
     if (_password.text.isEmpty) {
-      showMessage(context, '请填写密码', error: true);
+      showErrorSnack(context, '请填写密码');
       return;
     }
     if (dbTypeUsesHost(server.type) && _hostOption == 'specific') {

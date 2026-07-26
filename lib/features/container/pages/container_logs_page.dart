@@ -7,11 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/api/ws_client.dart';
 import '../../../core/models/server.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
+import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
-import '../widgets/action_runner.dart';
 
 /// 容器实时日志页（`/containers/:id/logs`）。
 ///
@@ -172,6 +175,33 @@ class _ContainerLogsPageState extends ConsumerState<ContainerLogsPage> {
     });
   }
 
+  /// 距底部多少像素以内算「贴着底部」。
+  static const double _bottomThreshold = 24;
+
+  /// 用户手动滚动与自动滚动的冲突处理。
+  ///
+  /// 之前只要有新日志就无条件 `jumpTo` 到底部，用户往上翻看历史时会被
+  /// 反复拽回底部，根本读不完一行。现在：手指往上拖离底部即暂停自动滚动，
+  /// 重新滚回底部（含惯性滑动结束时）自动恢复。
+  ///
+  /// 只认 `dragDetails != null` 的滚动更新（即真正的手指拖动），
+  /// 程序化的 `jumpTo` 不会被误判为用户操作。
+  bool _onScrollNotification(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    final atBottom =
+        metrics.pixels >= metrics.maxScrollExtent - _bottomThreshold;
+
+    if (notification is ScrollUpdateNotification &&
+        notification.dragDetails != null) {
+      if (atBottom != _autoScroll) setState(() => _autoScroll = atBottom);
+    } else if (notification is ScrollEndNotification &&
+        atBottom &&
+        !_autoScroll) {
+      setState(() => _autoScroll = true);
+    }
+    return false;
+  }
+
   /// 去掉 ANSI 控制序列（面板日志可能带颜色码）。
   static String _stripAnsi(String input) =>
       input.replaceAll(RegExp(r'\x1B\[[0-9;?]*[ -/]*[@-~]'), '');
@@ -182,7 +212,21 @@ class _ContainerLogsPageState extends ConsumerState<ContainerLogsPage> {
     await _connect();
   }
 
-  void _clear() {
+  /// 清空已接收的日志。
+  ///
+  /// 面板只推送接入之后产生的日志，清空后这些内容无法再取回，
+  /// 因此有内容时先二次确认。
+  Future<void> _clear() async {
+    if (_lines.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '清空日志',
+      content: '将清空已接收的 ${_lines.length} 行日志。'
+          '面板只推送接入之后产生的日志，清空后无法找回。确定继续吗？',
+      confirmText: '清空',
+      danger: true,
+    );
+    if (!ok || !mounted) return;
     setState(() {
       _lines.clear();
       _pending = '';
@@ -191,12 +235,12 @@ class _ContainerLogsPageState extends ConsumerState<ContainerLogsPage> {
 
   Future<void> _copyAll() async {
     if (_lines.isEmpty) {
-      showSuccessSnackBar(context, '暂无可复制的日志');
+      showInfoSnack(context, '暂无可复制的日志');
       return;
     }
     await Clipboard.setData(ClipboardData(text: _lines.join('\n')));
     if (!mounted) return;
-    showSuccessSnackBar(context, '已复制 ${_lines.length} 行日志');
+    showSuccessSnack(context, '已复制 ${_lines.length} 行日志');
   }
 
   @override
@@ -208,28 +252,29 @@ class _ContainerLogsPageState extends ConsumerState<ContainerLogsPage> {
       appBar: AppBar(
         title: const Text('实时日志'),
         actions: [
-          IconButton(
-            tooltip: _autoScroll ? '暂停自动滚动' : '恢复自动滚动',
+          // 图标表示「按下会做什么」：跟随中显示暂停，暂停中显示回到底部。
+          A11yIconButton(
+            tooltip: _autoScroll ? '暂停自动滚动' : '恢复自动滚动并回到底部',
             icon: Icon(_autoScroll
-                ? Icons.vertical_align_bottom
-                : Icons.pause_circle_outline),
+                ? Icons.pause_circle_outline
+                : Icons.vertical_align_bottom),
             onPressed: () {
               setState(() => _autoScroll = !_autoScroll);
               _scheduleScroll();
             },
           ),
-          IconButton(
-            tooltip: '复制全部',
+          A11yIconButton(
+            tooltip: '复制全部日志',
             icon: const Icon(Icons.copy_all_outlined),
-            onPressed: _copyAll,
+            onPressed: _lines.isEmpty ? null : _copyAll,
           ),
-          IconButton(
-            tooltip: '清空',
+          A11yIconButton(
+            tooltip: '清空日志',
             icon: const Icon(Icons.clear_all),
-            onPressed: _clear,
+            onPressed: _lines.isEmpty ? null : _clear,
           ),
-          IconButton(
-            tooltip: '重新连接',
+          A11yIconButton(
+            tooltip: '重新连接日志流',
             icon: const Icon(Icons.refresh),
             onPressed: _connecting ? null : _reconnect,
           ),
@@ -309,20 +354,23 @@ class _ContainerLogsPageState extends ConsumerState<ContainerLogsPage> {
     return Container(
       color: theme.colorScheme.surfaceContainerLowest,
       child: SelectionArea(
-        child: Scrollbar(
-          controller: _scrollController,
-          child: ListView.builder(
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: Scrollbar(
             controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            itemCount: _lines.length,
-            itemBuilder: (context, index) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Text(
-                _lines[index],
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontFamily: 'monospace',
-                  fontFamilyFallback: const ['Courier'],
-                  height: 1.45,
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: _lines.length,
+              itemBuilder: (context, index) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Text(
+                  _lines[index],
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    fontFamilyFallback: const ['Courier'],
+                    height: 1.45,
+                  ),
                 ),
               ),
             ),
@@ -377,7 +425,9 @@ class _StatusBar extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            autoScroll ? '自动滚动' : '已暂停滚动',
+            autoScroll ? '自动滚动中' : '已暂停自动滚动',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

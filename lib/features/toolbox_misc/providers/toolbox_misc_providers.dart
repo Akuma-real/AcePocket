@@ -1,12 +1,16 @@
 import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/benchmark_models.dart';
 import '../models/log_models.dart';
 import '../models/network_models.dart';
 import '../models/system_models.dart';
 import '../repo/toolbox_misc_repo.dart';
+
+export '../../../core/providers/paged_notifier_base.dart' show PagedState;
 
 /// 系统工具箱数据仓库。
 final toolboxMiscRepoProvider = Provider<ToolboxMiscRepository>(
@@ -75,8 +79,8 @@ class LogCleanNotifier extends Notifier<Map<String, LogScanState>> {
 
   @override
   Map<String, LogScanState> build() {
-    // 服务器切换后结果失效。
-    ref.watch(activeServerProvider);
+    // watch 而非 read：切换服务器时 repo 重建，扫描结果随之失效。
+    ref.watch(toolboxMiscRepoProvider);
     _disposed = false;
     ref.onDispose(() => _disposed = true);
     return {
@@ -113,9 +117,12 @@ class LogCleanNotifier extends Notifier<Map<String, LogScanState>> {
   }
 
   /// 清理指定类型，成功返回释放的空间文案，失败抛出异常由页面提示。
-  Future<String> clean(String type) async {
+  ///
+  /// 该类型正在扫描 / 清理时直接返回 null（调用方据此跳过提示），
+  /// 避免重复点击时弹出「已清理，释放 」这种半截文案。
+  Future<String?> clean(String type) async {
     final current = stateOf(type);
-    if (current.busy) return '';
+    if (current.busy) return null;
     _patch(type, current.copyWith(cleaning: true, clearError: true));
     try {
       final cleaned = await ref.read(toolboxMiscRepoProvider).cleanLogs(type);
@@ -136,89 +143,38 @@ class LogCleanNotifier extends Notifier<Map<String, LogScanState>> {
 final networkFilterProvider =
     StateProvider.autoDispose<NetworkFilter>((ref) => const NetworkFilter());
 
-/// 分页列表状态。
-class PagedState<T> {
-  const PagedState({
-    required this.items,
-    required this.total,
-    required this.page,
-    this.loadingMore = false,
-  });
-
-  final List<T> items;
-  final int total;
-
-  /// 已加载到的页码（从 1 开始）。
-  final int page;
-
-  /// 是否正在加载下一页。
-  final bool loadingMore;
-
-  bool get hasMore => items.length < total;
-
-  PagedState<T> copyWith({bool? loadingMore}) => PagedState<T>(
-        items: items,
-        total: total,
-        page: page,
-        loadingMore: loadingMore ?? this.loadingMore,
-      );
-}
-
 /// 网络连接分页列表：首屏加载、下拉刷新、上拉加载更多。
-class NetworkConnectionsNotifier
-    extends AutoDisposeAsyncNotifier<PagedState<NetworkConnection>> {
-  static const int pageSize = 30;
-
-  Future<Paged<NetworkConnection>> _fetch(int page) =>
-      ref.read(toolboxMiscRepoProvider).networkConnections(
-            page: page,
-            limit: pageSize,
-            filter: ref.read(networkFilterProvider),
-          );
+///
+/// 分页并发控制统一走 [PagedAsyncNotifier]（请求代次丢弃过期响应、
+/// 在途标志存放在 pager 而非 state），不再手写。
+class NetworkConnectionsNotifier extends PagedAsyncNotifier<NetworkConnection> {
+  @override
+  int get pageSize => 30;
 
   @override
-  Future<PagedState<NetworkConnection>> build() async {
+  Future<PagedState<NetworkConnection>> build() {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(toolboxMiscRepoProvider);
     // 筛选条件变化时重建列表。
     ref.watch(networkFilterProvider);
-    final paged = await _fetch(1);
-    return PagedState<NetworkConnection>(
+    return super.build();
+  }
+
+  @override
+  Future<PagedResult<NetworkConnection>> fetchPage(int page, int limit) async {
+    final paged = await ref.read(toolboxMiscRepoProvider).networkConnections(
+          page: page,
+          limit: limit,
+          filter: ref.read(networkFilterProvider),
+        );
+    return PagedResult<NetworkConnection>(
       items: paged.items,
       total: paged.total,
-      page: 1,
     );
   }
 
-  /// 下拉刷新：重新拉取第一页。
-  Future<void> refresh() async {
-    final paged = await _fetch(1);
-    state = AsyncData(PagedState<NetworkConnection>(
-      items: paged.items,
-      total: paged.total,
-      page: 1,
-    ));
-  }
-
-  /// 加载下一页；已到末页或正在加载时忽略。
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final nextPage = current.page + 1;
-      final paged = await _fetch(nextPage);
-      final merged = [...current.items, ...paged.items];
-      state = AsyncData(PagedState<NetworkConnection>(
-        items: merged,
-        // 空页即视为到底，避免 total 与实际条数不一致时反复触发加载。
-        total: paged.items.isEmpty ? merged.length : paged.total,
-        page: nextPage,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-    }
-  }
+  /// 下拉刷新：重新拉取第一页；失败时保留现有列表并把异常抛给页面提示。
+  Future<void> refresh() => reloadFirstPage(toErrorState: false);
 }
 
 final networkConnectionsProvider = AsyncNotifierProvider.autoDispose<
@@ -245,7 +201,8 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
 
   @override
   BenchmarkState build() {
-    ref.watch(activeServerProvider);
+    // watch 而非 read：切换服务器时 repo 重建，成绩随之作废。
+    ref.watch(toolboxMiscRepoProvider);
     _disposed = false;
     _stopRequested = false;
     ref.onDispose(() {
@@ -296,6 +253,7 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
       disk: keys.contains('disk') ? null : state.disk,
       errors: errors,
       finishedAt: state.finishedAt,
+      startedAt: DateTime.now(),
     ));
 
     var completed = 0;
@@ -326,7 +284,7 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
         if (_disposed) return;
         if (_stopRequested) break;
         _set(state.copyWith(
-          errors: {...state.errors, key: _message(e)},
+          errors: {...state.errors, key: describeError(e)},
         ));
       } finally {
         _cancelToken = null;
@@ -340,6 +298,7 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
       stopping: false,
       clearCurrentKey: true,
       finishedAt: DateTime.now(),
+      stopped: _stopRequested,
     ));
   }
 
@@ -348,7 +307,4 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
     if (state.running) return;
     _set(const BenchmarkState());
   }
-
-  static String _message(Object error) =>
-      error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
 }

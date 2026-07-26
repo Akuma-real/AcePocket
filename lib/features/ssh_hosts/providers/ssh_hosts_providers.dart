@@ -1,10 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/storage/server_store.dart';
-import '../models/paged.dart';
 import '../models/ssh_file_info.dart';
 import '../models/ssh_host.dart';
 import '../repo/ssh_hosts_repo.dart';
+
+/// 分页状态复用 core 的实现（含 loadMoreError / 代次守卫），
+/// 转发导出以便本模块的页面与组件只 import 本文件。
+export '../../../core/providers/paged_notifier_base.dart' show PagedState;
 
 /// 当前服务器的 SSH 主机仓库。
 final sshHostsRepoProvider = Provider<SshHostsRepository>(
@@ -13,76 +17,28 @@ final sshHostsRepoProvider = Provider<SshHostsRepository>(
 
 // ------------------------------------------------------------------ 分页列表
 
-/// 分页列表状态。
-class PagedState<T> {
-  const PagedState({
-    required this.items,
-    required this.total,
-    required this.page,
-    this.loadingMore = false,
-  });
-
-  final List<T> items;
-  final int total;
-
-  /// 已加载到的页码（从 1 开始）。
-  final int page;
-
-  /// 是否正在加载下一页。
-  final bool loadingMore;
-
-  bool get hasMore => items.length < total;
-
-  PagedState<T> copyWith({bool? loadingMore}) => PagedState<T>(
-        items: items,
-        total: total,
-        page: page,
-        loadingMore: loadingMore ?? this.loadingMore,
-      );
-}
-
 /// SSH 主机分页列表：首屏加载、下拉刷新、上拉加载更多。
-class SshHostsNotifier extends AutoDisposeAsyncNotifier<PagedState<SshHost>> {
-  static const int pageSize = 20;
-
-  Future<Paged<SshHost>> _fetch(int page) =>
-      ref.read(sshHostsRepoProvider).list(page: page, limit: pageSize);
-
+///
+/// 并发控制（请求代次 / 在途标志 / loadMoreError）由 [PagedAsyncNotifier]
+/// 统一提供：refresh 与 loadMore 交错时过期响应会被丢弃，
+/// 不会出现「已删除主机复活」「第 2 页追加到新服务器数据后面」等竞态。
+class SshHostsNotifier extends PagedAsyncNotifier<SshHost> {
   @override
-  Future<PagedState<SshHost>> build() async {
+  Future<PagedState<SshHost>> build() {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(sshHostsRepoProvider);
-    final paged = await _fetch(1);
-    return PagedState<SshHost>(items: paged.items, total: paged.total, page: 1);
+    return super.build();
   }
 
-  /// 下拉刷新：重新拉取第一页。失败时抛出异常（供调用方提示）。
-  Future<void> refresh() async {
-    final paged = await _fetch(1);
-    state = AsyncData(
-      PagedState<SshHost>(items: paged.items, total: paged.total, page: 1),
-    );
+  @override
+  Future<PagedResult<SshHost>> fetchPage(int page, int limit) async {
+    final paged =
+        await ref.read(sshHostsRepoProvider).list(page: page, limit: limit);
+    return PagedResult<SshHost>(items: paged.items, total: paged.total);
   }
 
-  /// 加载下一页；已到末页或正在加载时忽略。加载失败静默恢复（可再次触发）。
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final nextPage = current.page + 1;
-      final paged = await _fetch(nextPage);
-      final merged = [...current.items, ...paged.items];
-      state = AsyncData(PagedState<SshHost>(
-        items: merged,
-        // 空页即视为到底，避免 total 与实际条数不一致时反复触发「加载更多」。
-        total: paged.items.isEmpty ? merged.length : paged.total,
-        page: nextPage,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-    }
-  }
+  /// 下拉刷新：重新拉取第一页。失败时保留旧数据并抛出异常（供 SnackBar 提示）。
+  Future<void> refresh() => reloadFirstPage(toErrorState: false);
 }
 
 /// SSH 主机列表。

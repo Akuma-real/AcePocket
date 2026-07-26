@@ -291,9 +291,12 @@ class _AccountFormState extends ConsumerState<_AccountForm> {
           ],
         ),
         if (_submitting)
-          const Positioned.fill(
+          Positioned.fill(
+            // 原来写死 0x11000000，深色主题下黑遮罩几乎不可见；改用主题 scrim。
             child: IgnorePointer(
-              child: ColoredBox(color: Color(0x11000000)),
+              child: ColoredBox(
+                color: theme.colorScheme.scrim.withValues(alpha: 0.08),
+              ),
             ),
           ),
       ],

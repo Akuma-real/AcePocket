@@ -3,13 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/notify_channel.dart';
 import '../providers/notify_alert_providers.dart';
 import '../widgets/form_fields.dart';
-import '../widgets/snack.dart';
 
 /// 通知渠道表单页 `/notify/channels/new` 与 `/notify/channels/:id/edit`。
 ///
@@ -41,6 +42,15 @@ class _NotifyChannelFormPageState
   bool _saving = false;
   bool _obscurePassword = true;
 
+  /// 表单是否有未保存的修改（与加载时的原始值逐项比较）。
+  bool _dirty = false;
+
+  /// [_apply] 回填控件期间不计入修改。
+  bool _applying = false;
+
+  /// 原始值快照。
+  String _pristine = '';
+
   String _encryption = kSmtpEncryptionSsl;
   List<String> _recipients = <String>[];
   bool _skipVerify = false;
@@ -51,6 +61,17 @@ class _NotifyChannelFormPageState
   @override
   void initState() {
     super.initState();
+    for (final controller in <TextEditingController>[
+      _nameController,
+      _hostController,
+      _portController,
+      _usernameController,
+      _passwordController,
+      _fromController,
+      _fromNameController,
+    ]) {
+      controller.addListener(_onFieldChanged);
+    }
     if (!_isEdit) {
       _apply(const NotifyChannel(
         id: 0,
@@ -60,6 +81,27 @@ class _NotifyChannelFormPageState
         enabled: true,
       ));
     }
+  }
+
+  /// 当前表单值的快照，用于判断是否有未保存的修改。
+  String _snapshot() => <String>[
+        _nameController.text.trim(),
+        _hostController.text.trim(),
+        _portController.text.trim(),
+        _usernameController.text.trim(),
+        _passwordController.text,
+        _fromController.text.trim(),
+        _fromNameController.text.trim(),
+        _encryption,
+        '$_skipVerify',
+        '$_enabled',
+        _recipients.map((e) => e.trim()).where((e) => e.isNotEmpty).join(','),
+      ].join('\u0000');
+
+  void _onFieldChanged() {
+    if (_applying) return;
+    final dirty = _snapshot() != _pristine;
+    if (dirty != _dirty && mounted) setState(() => _dirty = dirty);
   }
 
   @override
@@ -75,6 +117,7 @@ class _NotifyChannelFormPageState
   }
 
   void _apply(NotifyChannel channel) {
+    _applying = true;
     final smtp = SmtpConfig.fromJson(channel.config);
     _nameController.text = channel.name;
     _hostController.text = smtp.host;
@@ -88,6 +131,9 @@ class _NotifyChannelFormPageState
     _skipVerify = smtp.skipVerify;
     _enabled = channel.enabled;
     _initialized = true;
+    _pristine = _snapshot();
+    _dirty = false;
+    _applying = false;
   }
 
   /// 切换加密方式时同步常用端口（与面板前端一致）。
@@ -96,21 +142,23 @@ class _NotifyChannelFormPageState
       _encryption = encryption;
       _portController.text = '${smtpDefaultPort(encryption)}';
     });
+    _onFieldChanged();
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final recipients =
         _recipients.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     if (recipients.isEmpty) {
-      showSnack(context, '请至少填写一个收件人', error: true);
+      showErrorSnack(context, '请至少填写一个收件人');
       return;
     }
     for (final recipient in recipients) {
       final error = validateEmail(recipient);
       if (error != null) {
-        showSnack(context, '收件人 $recipient：$error', error: true);
+        showErrorSnack(context, '收件人 $recipient：$error');
         return;
       }
     }
@@ -143,7 +191,8 @@ class _NotifyChannelFormPageState
         await repo.createNotifyChannel(channel);
       }
       if (!mounted) return;
-      showSnack(context, _isEdit ? '渠道已保存' : '渠道已创建');
+      _dirty = false;
+      showSuccessSnack(context, _isEdit ? '渠道已保存' : '渠道已创建');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -174,32 +223,36 @@ class _NotifyChannelFormPageState
       _apply(async.requireValue);
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 96),
-          children: [
-            _basicCard(),
-            _serverCard(),
-            _senderCard(),
-          ],
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '渠道配置尚未保存，返回后填写的内容会丢失。确定放弃吗？',
+      child: Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 96),
+            children: [
+              _basicCard(),
+              _serverCard(),
+              _senderCard(),
+            ],
+          ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(_saving ? '保存中…' : '保存'),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_saving ? '保存中…' : '保存'),
+            ),
           ),
         ),
       ),
@@ -235,7 +288,10 @@ class _NotifyChannelFormPageState
           const SizedBox(height: 8),
           SwitchListTile(
             value: _enabled,
-            onChanged: (value) => setState(() => _enabled = value),
+            onChanged: (value) {
+              setState(() => _enabled = value);
+              _onFieldChanged();
+            },
             title: const Text('启用渠道'),
             subtitle: const Text('停用后不会向该渠道发送任何通知'),
             contentPadding: EdgeInsets.zero,
@@ -362,9 +418,12 @@ class _NotifyChannelFormPageState
           const SizedBox(height: 8),
           SwitchListTile(
             value: _skipVerify,
-            onChanged: (value) => setState(() => _skipVerify = value),
+            onChanged: (value) {
+              setState(() => _skipVerify = value);
+              _onFieldChanged();
+            },
             title: const Text('跳过证书校验'),
-            subtitle: const Text('服务器使用自签名证书时开启'),
+            subtitle: const Text('仅在服务器使用自签名证书时开启，开启后无法防止中间人攻击'),
             contentPadding: EdgeInsets.zero,
           ),
         ],
@@ -414,7 +473,10 @@ class _NotifyChannelFormPageState
             keyboardType: TextInputType.emailAddress,
             initialValues: _recipients,
             validator: validateEmail,
-            onChanged: (values) => _recipients = values,
+            onChanged: (values) {
+              _recipients = values;
+              _onFieldChanged();
+            },
           ),
         ],
       ),

@@ -1,47 +1,11 @@
+/// 磁盘工具箱内部复用的展示型小组件。
+///
+/// 提示与格式化统一走 core，不在本模块自带副本：
+/// 成功 / 错误提示用 `core/widgets/app_snack.dart`，
+/// 字节格式化用 `core/utils/format.dart` 的 `formatBytes`。
+library;
+
 import 'package:flutter/material.dart';
-
-import '../../../core/api/api_exception.dart';
-
-/// 把异常转成可直接展示的文案（[ApiException] 取面板返回的 msg）。
-String errorMessage(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 统一的顶部提示（成功 / 失败）。
-void showSnack(BuildContext context, String message, {bool error = false}) {
-  if (!context.mounted) return;
-  final theme = Theme.of(context);
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(
-            color: error ? theme.colorScheme.onErrorContainer : null,
-          ),
-        ),
-        backgroundColor: error ? theme.colorScheme.errorContainer : null,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: error ? 4 : 2),
-      ),
-    );
-}
-
-/// 字节数格式化（1024 进制，与面板 Web 端 formatBytes 表现一致）。
-String formatBytes(int bytes) {
-  if (bytes <= 0) return '0 B';
-  const units = <String>['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  var value = bytes.toDouble();
-  var index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index++;
-  }
-  final text = index == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
-  return '$text ${units[index]}';
-}
 
 /// 只读信息行：左标题右取值。
 class InfoRow extends StatelessWidget {
@@ -93,6 +57,11 @@ class InfoRow extends StatelessWidget {
 }
 
 /// 小标签（分区类型 / 文件系统 / 状态等）。
+///
+/// 文案单行省略：RAID / SMART 的状态字段来自 `mdadm`、`storcli` 等命令的原始
+/// 输出，偶尔会是「Optimal (Rebuilding 12%)」这类长串。标签本身按内容自适应
+/// 宽度，放在 [Row] 里时**调用方要用 [Flexible] 包住**，否则同排的 [Expanded]
+/// 会被挤成 0 宽并触发溢出。
 class TagChip extends StatelessWidget {
   const TagChip({super.key, required this.label, this.color, this.icon});
 
@@ -119,6 +88,8 @@ class TagChip extends StatelessWidget {
           ],
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(color: base),
           ),
         ],
@@ -211,15 +182,26 @@ class NoticeBar extends StatelessWidget {
 }
 
 /// 列表内的小型加载遮罩（操作执行中）。
+///
+/// [semanticsLabel] 会被读屏播报，默认「操作执行中」——按钮在执行期间被替换成
+/// 本组件，若没有语义标签，TalkBack 用户只会感觉按钮凭空消失。
 class BusyIndicator extends StatelessWidget {
-  const BusyIndicator({super.key, this.size = 18});
+  const BusyIndicator({
+    super.key,
+    this.size = 18,
+    this.semanticsLabel = '操作执行中',
+  });
 
   final double size;
+  final String semanticsLabel;
 
   @override
   Widget build(BuildContext context) => SizedBox(
         width: size,
         height: size,
-        child: const CircularProgressIndicator(strokeWidth: 2),
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          semanticsLabel: semanticsLabel,
+        ),
       );
 }

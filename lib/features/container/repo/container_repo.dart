@@ -261,14 +261,29 @@ class ContainerRepository {
       });
 
   /// 启动编排（`force` 对应 `docker compose up -d --pull always`）。
-  Future<void> composeUp(String name, {bool force = false}) =>
-      _api.post('/container/compose/$name/up', body: {'force': force});
+  ///
+  /// 面板同步等待 `docker compose up -d` 结束才返回，其中包含拉取镜像，
+  /// 首次启动大镜像时远超 [ApiClient] 默认 60 秒 receiveTimeout。
+  /// 与 [pullImage] 同样放宽到 30 分钟，避免客户端报超时而服务端仍在执行。
+  Future<void> composeUp(String name, {bool force = false}) => _api.post(
+        '/container/compose/$name/up',
+        body: {'force': force},
+        receiveTimeout: const Duration(minutes: 30),
+      );
 
   /// 停止编排（`docker compose down`）。
-  Future<void> composeDown(String name) =>
-      _api.post('/container/compose/$name/down');
+  ///
+  /// 容器的停止宽限期（默认 10 秒 / 服务）叠加起来可能超过默认超时。
+  Future<void> composeDown(String name) => _api.post(
+        '/container/compose/$name/down',
+        receiveTimeout: const Duration(minutes: 10),
+      );
 
   /// 删除编排（服务端会先 down 再删除目录）。
+  ///
+  /// 注意：`ApiClient.delete` 暂不支持自定义 receiveTimeout（core 的接口），
+  /// 因此仍是默认 60 秒；容器较多时可能报超时而服务端已在执行，
+  /// 页面提示里说明了「稍后刷新确认」。
   Future<void> removeCompose(String name) =>
       _api.delete('/container/compose/$name');
 }

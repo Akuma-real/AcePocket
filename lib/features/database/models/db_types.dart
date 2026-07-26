@@ -4,8 +4,6 @@ library;
 
 import 'dart:math';
 
-import 'package:intl/intl.dart';
-
 /// 可添加的数据库服务器类型
 /// （`request.DatabaseServerCreate` 的 `in:` 校验列表）。
 const List<String> kDatabaseServerTypes = [
@@ -104,25 +102,8 @@ const List<(String, String)> kMysqlHostOptions = [
 /// Redis 键类型（`request.DatabaseRedisKeySet` 的 `in:` 校验列表）。
 const List<String> kRedisKeyTypes = ['string', 'list', 'set', 'zset', 'hash'];
 
-/// 字节数友好展示。
-String formatBytes(int bytes) {
-  if (bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  var value = bytes.toDouble();
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  final text = unit == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
-  return '$text ${units[unit]}';
-}
-
-/// 时间友好展示（本地时区）。
-String formatDateTime(DateTime? time) {
-  if (time == null) return '-';
-  return DateFormat('yyyy-MM-dd HH:mm').format(time.toLocal());
-}
+// 字节数展示统一用 `core/utils/format.dart` 的 formatBytes（同为 1024 进制循环
+// 除法，另外覆盖 NaN / 负数 / PB / EB），本文件不再维护副本。
 
 const String _kPasswordChars =
     'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';

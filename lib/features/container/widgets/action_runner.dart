@@ -1,40 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/api/api_exception.dart';
-import '../../../core/api/ws_client.dart';
-
-/// 把任意异常转换为可直接展示的中文文案。
-String describeError(Object error) {
-  if (error is ApiException) return error.message;
-  if (error is WsAuthException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w*Exception:\s*'), '');
-}
-
-/// 展示一条错误提示。
-void showErrorSnackBar(BuildContext context, Object error) {
-  final colorScheme = Theme.of(context).colorScheme;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          describeError(error),
-          style: TextStyle(color: colorScheme.onErrorContainer),
-        ),
-        backgroundColor: colorScheme.errorContainer,
-      ),
-    );
-}
-
-/// 展示一条成功提示。
-void showSuccessSnackBar(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
-}
+import '../../../core/widgets/app_snack.dart';
 
 /// 执行一个耗时操作：期间展示不可取消的进度对话框，
 /// 成功后弹出 [success] 提示，失败弹出错误提示。返回是否成功。
+///
+/// 进度对话框是模态且不可取消的，因此在操作在途期间调用方的按钮
+/// 无需再自行防重复点击。
 ///
 /// 危险操作请先用 core 的 `showConfirmDialog` 二次确认。
 Future<bool> runAction(
@@ -44,8 +16,6 @@ Future<bool> runAction(
   String? success,
 }) async {
   final navigator = Navigator.of(context, rootNavigator: true);
-  final messenger = ScaffoldMessenger.of(context);
-  final colorScheme = Theme.of(context).colorScheme;
 
   showDialog<void>(
     context: context,
@@ -61,28 +31,15 @@ Future<bool> runAction(
     failure = error;
   }
 
-  if (navigator.canPop()) navigator.pop();
+  if (navigator.mounted && navigator.canPop()) navigator.pop();
 
+  // 提示统一走 core 的 app_snack（成对配色，深浅主题下均满足对比度）；
+  // context 已失效时其内部会直接跳过。
   if (failure != null) {
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            describeError(failure),
-            style: TextStyle(color: colorScheme.onErrorContainer),
-          ),
-          backgroundColor: colorScheme.errorContainer,
-        ),
-      );
+    if (context.mounted) showErrorSnack(context, failure);
     return false;
   }
-
-  if (success != null) {
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(success)));
-  }
+  if (success != null && context.mounted) showSuccessSnack(context, success);
   return true;
 }
 
@@ -110,7 +67,12 @@ class _ProgressDialog extends StatelessWidget {
               ),
               const SizedBox(width: 16),
               Flexible(
-                child: Text(message, style: theme.textTheme.bodyMedium),
+                child: Text(
+                  message,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
               ),
             ],
           ),

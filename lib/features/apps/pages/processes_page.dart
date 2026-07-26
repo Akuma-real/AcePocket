@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -28,6 +30,9 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
   Timer? _debounce;
   bool _loadingMore = false;
 
+  /// 最近一次「加载更多」的失败原因，用于在列表底部展示重试入口。
+  Object? _loadMoreError;
+
   @override
   void initState() {
     super.initState();
@@ -43,18 +48,6 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
 
   ProcessListNotifier get _notifier => ref.read(processListProvider.notifier);
 
-  void _toast(String message, {bool error = false}) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-      ),
-    );
-  }
-
   void _onSearchChanged(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () {
@@ -66,9 +59,20 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
   Future<void> _loadMore() async {
     if (_loadingMore) return;
     _loadingMore = true;
+    if (_loadMoreError != null) setState(() => _loadMoreError = null);
     final error = await _notifier.loadMore();
     _loadingMore = false;
-    if (error != null) _toast('加载更多失败：$error', error: true);
+    if (!mounted) return;
+    setState(() => _loadMoreError = error);
+    if (error != null) showErrorSnack(context, error);
+  }
+
+  /// 下拉刷新：失败只提示，不清空已加载的进程（见 [ProcessListNotifier.refresh]）。
+  Future<void> _refresh() async {
+    final error = await _notifier.refresh();
+    if (!mounted) return;
+    if (_loadMoreError != null) setState(() => _loadMoreError = null);
+    if (error != null) showErrorSnack(context, error);
   }
 
   Future<void> _run(
@@ -82,14 +86,15 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
     try {
       await action();
       if (!mounted) return;
-      _toast(successMessage);
+      showSuccessSnack(context, successMessage);
       if (removeFromList) {
         _notifier.removePid(pid);
       } else {
+        // 刷新失败不覆盖上面的成功提示：操作本身已成功，列表沿用旧数据即可。
         await _notifier.refresh();
       }
     } catch (e) {
-      _toast('操作失败：$e', error: true);
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyPids.remove(pid));
     }
@@ -199,9 +204,9 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
       appBar: AppBar(
         title: const Text('进程管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
-            onPressed: () => _notifier.refresh(),
+          A11yIconButton(
+            tooltip: '刷新进程列表',
+            onPressed: _refresh,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -222,7 +227,8 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: query.keyword.isEmpty
                     ? null
-                    : IconButton(
+                    : A11yIconButton(
+                        tooltip: '清除搜索关键词',
                         icon: const Icon(Icons.close),
                         onPressed: () {
                           _searchController.clear();
@@ -242,6 +248,7 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
                 ActionChip(
                   avatar: const Icon(Icons.sort, size: 18),
                   label: Text('排序：${sortField.label}'),
+                  tooltip: '选择排序字段',
                   onPressed: _pickSort,
                 ),
                 const SizedBox(width: 8),
@@ -251,6 +258,7 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
                     size: 18,
                   ),
                   label: Text(query.desc ? '降序' : '升序'),
+                  tooltip: query.desc ? '改为升序排列' : '改为降序排列',
                   onPressed: () =>
                       ref.read(processQueryProvider.notifier).toggleOrder(),
                 ),
@@ -265,30 +273,32 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
               ],
             ),
           ),
-          Expanded(child: _buildList(state)),
+          Expanded(child: _buildList(state, query)),
         ],
       ),
     );
   }
 
-  Widget _buildList(ProcessListState state) {
+  Widget _buildList(ProcessListState state, ProcessQuery query) {
     if (state.isLoading && state.items.isEmpty) {
       return const LoadingView(message: '加载进程列表…');
     }
     if (state.error != null && state.items.isEmpty) {
       return ErrorView(
         error: state.error!,
-        onRetry: () => _notifier.refresh(),
+        onRetry: () => _notifier.reload(),
       );
     }
 
     return RefreshIndicator(
-      onRefresh: () => _notifier.refresh(),
+      onRefresh: _refresh,
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification.metrics.axis != Axis.vertical) return false;
           if (state.hasMore &&
               !state.isLoadingMore &&
+              // 失败后不再自动重试，避免离线时反复打请求；由底部按钮手动触发。
+              _loadMoreError == null &&
               notification.metrics.pixels >=
                   notification.metrics.maxScrollExtent - 320) {
             _loadMore();
@@ -301,8 +311,10 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
                 children: [
                   SizedBox(
                     height: MediaQuery.of(context).size.height * 0.5,
-                    child: const EmptyView(
-                      message: '没有匹配的进程',
+                    child: EmptyView(
+                      message: query.keyword.isEmpty
+                          ? '没有可显示的进程\n可下拉刷新重试'
+                          : '没有匹配的进程\n可换个进程名或 PID 再试',
                       icon: Icons.memory_outlined,
                     ),
                   ),
@@ -318,6 +330,8 @@ class _ProcessesPageState extends ConsumerState<ProcessesPage> {
                       hasMore: state.hasMore,
                       total: state.total,
                       emptyLabel: '共 %d 个进程',
+                      error: _loadMoreError,
+                      onRetry: _loadMore,
                     );
                   }
                   final process = state.items[index];

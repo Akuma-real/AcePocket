@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/container_volume.dart';
 import '../models/json_utils.dart';
@@ -74,14 +75,14 @@ class VolumeListPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('存储卷管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新存储卷列表',
             icon: const Icon(Icons.refresh),
             onPressed: () =>
                 ref.read(containerVolumesProvider.notifier).reload(),
           ),
-          IconButton(
-            tooltip: '清理未使用存储卷',
+          A11yIconButton(
+            tooltip: '清理未使用的存储卷',
             icon: const Icon(Icons.cleaning_services_outlined),
             onPressed: () => _prune(context, ref),
           ),
@@ -176,7 +177,7 @@ class _VolumeTile extends StatelessWidget {
                             ),
                           StatusBadge(
                             label: volume.inUse
-                                ? '使用中 ${volume.refCount}'
+                                ? '${volume.refCount} 个容器使用中'
                                 : '未使用',
                             tone: volume.inUse
                                 ? BadgeTone.success
@@ -188,8 +189,8 @@ class _VolumeTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除存储卷',
+                A11yIconButton(
+                  tooltip: '删除存储卷 ${volume.name}',
                   icon: Icon(
                     Icons.delete_outline,
                     color: theme.colorScheme.error,

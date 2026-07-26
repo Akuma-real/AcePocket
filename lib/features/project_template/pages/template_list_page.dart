@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
@@ -13,7 +14,6 @@ import '../models/lv_option.dart';
 import '../models/template.dart';
 import '../providers/template_providers.dart';
 import '../widgets/list_footer.dart';
-import '../widgets/snack.dart';
 import '../widgets/template_tile.dart';
 
 /// 应用模板市场页 `/templates`。
@@ -57,13 +57,9 @@ class _TemplateListPageState extends ConsumerState<TemplateListPage> {
     }
   }
 
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(templateListProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  /// 加载下一页；失败会记录到 `state.loadMoreError`，由列表底部展示并可重试。
+  Future<void> _loadMore() =>
+      ref.read(templateListProvider.notifier).loadMore();
 
   Future<void> _refresh() async {
     ref.invalidate(templateCategoriesProvider);
@@ -110,8 +106,8 @@ class _TemplateListPageState extends ConsumerState<TemplateListPage> {
                 isDense: true,
                 suffixIcon: _searchController.text.isEmpty
                     ? null
-                    : IconButton(
-                        tooltip: '清空',
+                    : A11yIconButton(
+                        tooltip: '清空搜索关键词',
                         icon: const Icon(Icons.close),
                         onPressed: () {
                           _searchController.clear();
@@ -178,6 +174,8 @@ class _TemplateListPageState extends ConsumerState<TemplateListPage> {
                           hasMore: state.hasMore,
                           total: state.total,
                           unit: '个模板',
+                          error: state.loadMoreError,
+                          onRetry: _loadMore,
                         );
                       }
                       final template = state.items[index];

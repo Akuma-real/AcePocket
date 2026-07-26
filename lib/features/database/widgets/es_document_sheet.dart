@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../providers/database_providers.dart';
@@ -106,13 +107,13 @@ class _EsDocumentSheetState extends ConsumerState<EsDocumentSheet> {
   Future<void> _submit() async {
     final body = _body.text.trim();
     if (body.isEmpty) {
-      showMessage(context, '请填写文档内容', error: true);
+      showErrorSnack(context, '请填写文档内容');
       return;
     }
     try {
       jsonDecode(body);
     } catch (_) {
-      showMessage(context, '文档内容必须是合法的 JSON', error: true);
+      showErrorSnack(context, '文档内容必须是合法的 JSON，请检查括号与引号是否配对');
       return;
     }
 

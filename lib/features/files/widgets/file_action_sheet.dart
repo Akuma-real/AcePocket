@@ -64,8 +64,10 @@ Future<FileAction?> showFileActionSheet(
                     const SizedBox(height: 2),
                     Text(
                       item.dir
-                          ? '目录 · ${item.mode}'
-                          : '${item.size.isEmpty ? '文件' : item.size} · ${item.mode}',
+                          ? '目录 · 权限 ${item.mode}'
+                          : '${item.size.isEmpty ? '文件' : item.size} · 权限 ${item.mode}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),

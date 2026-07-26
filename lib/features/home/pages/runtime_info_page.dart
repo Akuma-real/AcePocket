@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -51,8 +53,8 @@ class _RuntimeInfoPageState extends ConsumerState<RuntimeInfoPage>
       appBar: AppBar(
         title: const Text('运行时诊断'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新运行时信息与协程堆栈',
             icon: const Icon(Icons.refresh),
             onPressed: _refresh,
           ),
@@ -87,9 +89,13 @@ class _RuntimeInfoPageState extends ConsumerState<RuntimeInfoPage>
   Widget _buildRuntimeTab() {
     final state = ref.watch(runtimeInfoProvider);
     return RefreshIndicator(
+      // 失败时错误由下方的 error 分支渲染；这里必须吞掉，否则失败的 Future
+      // 会从 RefreshIndicator 里逃逸成一条无人处理的异步异常。
       onRefresh: () async {
         ref.invalidate(runtimeInfoProvider);
-        await ref.read(runtimeInfoProvider.future);
+        try {
+          await ref.read(runtimeInfoProvider.future);
+        } catch (_) {}
       },
       child: state.when(
         loading: () => _scrollFill(const LoadingView(message: '正在获取运行时信息…')),
@@ -117,7 +123,9 @@ class _RuntimeInfoPageState extends ConsumerState<RuntimeInfoPage>
     return RefreshIndicator(
       onRefresh: () async {
         ref.invalidate(goroutinesProvider);
-        await ref.read(goroutinesProvider.future);
+        try {
+          await ref.read(goroutinesProvider.future);
+        } catch (_) {}
       },
       child: state.when(
         loading: () => _scrollFill(const LoadingView(message: '正在获取协程堆栈…')),
@@ -175,9 +183,7 @@ class _RuntimeInfoPageState extends ConsumerState<RuntimeInfoPage>
   Future<void> _copyAll(List<GoroutineInfo> list) async {
     await Clipboard.setData(ClipboardData(text: _rawText(list)));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('已复制 ${list.length} 条协程堆栈')));
+    showSuccessSnack(context, '已复制 ${list.length} 条协程堆栈');
   }
 
   void _openRaw(List<GoroutineInfo> list) {
@@ -252,8 +258,8 @@ class _GoroutineHeader extends StatelessWidget {
                 icon: const Icon(Icons.article_outlined, size: 18),
                 label: const Text('原始文本'),
               ),
-              IconButton(
-                tooltip: '复制全部堆栈',
+              A11yIconButton(
+                tooltip: '复制全部协程堆栈',
                 icon: const Icon(Icons.copy_all, size: 20),
                 onPressed: onCopyAll,
               ),
@@ -305,17 +311,15 @@ class _RawStackPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('协程堆栈原文'),
         actions: [
-          IconButton(
-            tooltip: '复制全部',
+          A11yIconButton(
+            tooltip: '复制全部协程堆栈原文',
             icon: const Icon(Icons.copy_all),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(
                 text: _RuntimeInfoPageState._rawText(list),
               ));
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context)
-                ..hideCurrentSnackBar()
-                ..showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+              showSuccessSnack(context, '已复制 ${list.length} 条协程堆栈');
             },
           ),
         ],

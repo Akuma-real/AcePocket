@@ -141,6 +141,7 @@ class _MonitorSettingDialogState extends ConsumerState<MonitorSettingDialog> {
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         labelText: '监控数据保留天数',
+                        helperText: '取值 1 - 3650，超期记录由面板自动清理',
                       ),
                       validator: (v) => _validateRange(v, 1, 3650, '保留天数'),
                     ),

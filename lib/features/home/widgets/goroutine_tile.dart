@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../models/runtime_models.dart';
 
 /// 单个协程的可展开条目：折叠时显示编号、状态与最内层调用，
@@ -20,11 +22,7 @@ class _GoroutineTileState extends State<GoroutineTile> {
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: widget.info.raw));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text('已复制 goroutine ${widget.info.id} 的堆栈')),
-      );
+    showSuccessSnack(context, '已复制 goroutine ${widget.info.id} 的堆栈');
   }
 
   @override
@@ -45,67 +43,72 @@ class _GoroutineTileState extends State<GoroutineTile> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              '#${info.id}',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                info.state.isEmpty ? '未知状态' : info.state,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+          // 整行可点但读屏只会念到里面的文字，不会说明「点了会怎样」，
+          // 用 hint 补上（label 留空，避免盖掉编号 / 状态 / 栈帧原文）。
+          Semantics(
+            hint: _expanded ? '收起完整堆栈' : '展开完整堆栈',
+            child: InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                '#${info.id}',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          info.topFrame.isEmpty ? '（无堆栈信息）' : info.topFrame,
-                          maxLines: _expanded ? 3 : 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                            color: colorScheme.onSurfaceVariant,
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  info.state.isEmpty ? '未知状态' : info.state,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 6),
+                          Text(
+                            info.topFrame.isEmpty ? '（无堆栈信息）' : info.topFrame,
+                            maxLines: _expanded ? 3 : 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: '复制堆栈',
-                    icon: const Icon(Icons.copy, size: 18),
-                    onPressed: _copy,
-                  ),
-                  Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ],
+                    A11yIconButton(
+                      tooltip: '复制 goroutine ${info.id} 的堆栈',
+                      icon: const Icon(Icons.copy, size: 18),
+                      onPressed: _copy,
+                    ),
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

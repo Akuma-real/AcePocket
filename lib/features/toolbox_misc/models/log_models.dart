@@ -137,15 +137,3 @@ int parseFormattedBytes(String text) {
   }
   return bytes.round();
 }
-
-/// 与面板 `tools.FormatBytes` 一致的字节格式化（用于本地汇总展示）。
-String formatBytes(num bytes) {
-  var size = bytes.toDouble();
-  const units = <String>['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-  var i = 0;
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024;
-    i++;
-  }
-  return '${size.toStringAsFixed(2)} ${units[i]}';
-}

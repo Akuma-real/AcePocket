@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/environment_models.dart';
 import 'environment_ui.dart';
 
@@ -71,6 +72,8 @@ class EnvironmentTile extends StatelessWidget {
                           env.name.isEmpty
                               ? '${environmentTypeLabel(env.type)} ${env.slug}'
                               : env.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleSmall,
                         ),
                         if (env.description.isNotEmpty) ...[
@@ -125,6 +128,8 @@ class EnvironmentTile extends StatelessWidget {
                       env.installed
                           ? '已装 ${_display(env.installedVersion)} · 最新 ${_display(env.version)}'
                           : '最新版本 ${_display(env.version)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -172,8 +177,8 @@ class EnvironmentTile extends StatelessWidget {
         onPressed: () => onAction(EnvironmentAction.manage),
         child: const Text('管理'),
       ),
-      IconButton(
-        tooltip: '卸载',
+      A11yIconButton(
+        tooltip: '卸载 ${env.name.isEmpty ? env.slug : env.name}',
         visualDensity: VisualDensity.compact,
         onPressed: () => onAction(EnvironmentAction.uninstall),
         icon: Icon(

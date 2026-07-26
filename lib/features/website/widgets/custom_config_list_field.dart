@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 import '../models/website_setting.dart';
 
 /// 自定义配置片段编辑器，对应 `request.WebsiteCustomConfig`。
@@ -131,8 +133,8 @@ class _CustomConfigCardState extends State<_CustomConfigCard> {
                     },
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: c.name.isEmpty ? '删除这段自定义配置' : '删除自定义配置 ${c.name}',
                   color: theme.colorScheme.error,
                   onPressed: widget.onRemove,
                   icon: const Icon(Icons.remove_circle_outline),
@@ -147,6 +149,7 @@ class _CustomConfigCardState extends State<_CustomConfigCard> {
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     initialValue: c.scope == 'shared' ? 'shared' : 'site',
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: '作用域'),
                     items: const [
                       DropdownMenuItem(value: 'site', child: Text('仅本网站')),

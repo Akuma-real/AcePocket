@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/backup_storage.dart';
 import '../models/option_item.dart';
+import '../models/page_result.dart';
 import '../repo/backup_storage_repo.dart';
 import 'paged_state.dart';
 
@@ -20,46 +21,20 @@ final backupStorageListProvider = AsyncNotifierProvider.autoDispose<
     PagedState<BackupStorage>>(BackupStorageListNotifier.new);
 
 class BackupStorageListNotifier
-    extends AutoDisposeAsyncNotifier<PagedState<BackupStorage>> {
+    extends CronBackupPagedNotifier<BackupStorage> {
   @override
-  Future<PagedState<BackupStorage>> build() async {
-    final repo = ref.watch(backupStorageRepoProvider);
-    final result = await repo.list(page: 1, limit: kStoragePageSize);
-    return PagedState(items: result.items, total: result.total, page: 1);
+  int get pageSize => kStoragePageSize;
+
+  @override
+  Future<PagedState<BackupStorage>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(backupStorageRepoProvider);
+    return super.build();
   }
 
-  Future<void> refresh() async {
-    final repo = ref.read(backupStorageRepoProvider);
-    state = await AsyncValue.guard(() async {
-      final result = await repo.list(page: 1, limit: kStoragePageSize);
-      return PagedState<BackupStorage>(
-        items: result.items,
-        total: result.total,
-        page: 1,
-      );
-    });
-  }
-
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.loadingMore || !current.hasMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final repo = ref.read(backupStorageRepoProvider);
-      final next = current.page + 1;
-      final result = await repo.list(page: next, limit: kStoragePageSize);
-      final merged = [...current.items, ...result.items];
-      state = AsyncData(PagedState<BackupStorage>(
-        items: merged,
-        // 空页即视为到底，避免 total 与实际条数不一致时反复触发「加载更多」。
-        total: result.items.isEmpty ? merged.length : result.total,
-        page: next,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-      rethrow;
-    }
-  }
+  @override
+  Future<PageResult<BackupStorage>> fetch(int page, int limit) =>
+      ref.read(backupStorageRepoProvider).list(page: page, limit: limit);
 
   /// 删除备份存储（成功后从列表移除）。
   Future<void> delete(int id) async {

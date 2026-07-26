@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -62,7 +64,7 @@ class _EnvironmentListPageState extends ConsumerState<EnvironmentListPage> {
       showTaskSubmittedSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busyKey = null);
     }
@@ -143,8 +145,8 @@ class _EnvironmentListPageState extends ConsumerState<EnvironmentListPage> {
       appBar: AppBar(
         title: const Text('运行环境'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新运行环境列表',
             icon: const Icon(Icons.refresh),
             onPressed: _refresh,
           ),
@@ -213,7 +215,8 @@ class _EnvironmentListPageState extends ConsumerState<EnvironmentListPage> {
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: filter.query.isEmpty
                     ? null
-                    : IconButton(
+                    : A11yIconButton(
+                        tooltip: '清空搜索关键字',
                         icon: const Icon(Icons.close, size: 18),
                         onPressed: () {
                           _searchController.clear();

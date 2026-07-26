@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/firewall_models.dart';
 import '../models/firewall_transfer.dart';
 import '../providers/security_providers.dart';
-import '../widgets/security_dialogs.dart';
 import '../widgets/security_tiles.dart';
 
 /// 防火墙端口规则导入页 `/firewall/import`。
@@ -73,7 +75,7 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
       picked = await FilePicker.pickFiles(withData: true);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, '打开文件选择器失败：${errorMessage(e)}', error: true);
+      showErrorSnack(context, e);
       return;
     }
     if (picked == null || picked.files.isEmpty) return;
@@ -85,13 +87,13 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
         bytes = await File(file.path!).readAsBytes();
       } catch (e) {
         if (!mounted) return;
-        showSnack(context, '读取文件失败：${errorMessage(e)}', error: true);
+        showErrorSnack(context, e);
         return;
       }
     }
     if (bytes == null || bytes.isEmpty) {
       if (!mounted) return;
-      showSnack(context, '未能读取所选文件内容', error: true);
+      showErrorSnack(context, const ApiException('未能读取所选文件内容'));
       return;
     }
     if (!mounted) return;
@@ -102,11 +104,11 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
       title: '导入端口规则？',
       content: '${isXlsx ? '' : '所选文件不是 .xlsx，面板可能无法解析。\n\n'}'
           '文件：${file.name}\n'
-          '大小：${_formatBytes(bytes.length)}\n\n'
+          '大小：${formatBytes(bytes.length, fractionDigits: 1)}\n\n'
           '面板会把文件中的每一行写入系统防火墙，已存在的规则会被跳过或覆盖。',
       confirmText: '开始导入',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       _uploading = true;
@@ -128,11 +130,11 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
         ],
         error: result.succeeded == 0 && result.failed > 0,
       );
-      showSnack(context, '导入完成：成功 ${result.succeeded} 条');
+      showSuccessSnack(context, '导入完成：成功 ${result.succeeded} 条');
     } catch (e) {
       if (!mounted) return;
-      _setResult('导入失败', [errorMessage(e)], error: true);
-      showSnack(context, errorMessage(e), error: true);
+      _setResult('导入失败', [describeError(e)], error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -161,7 +163,7 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
     final text = data?.text ?? '';
     if (text.trim().isEmpty) {
       if (!mounted) return;
-      showSnack(context, '剪贴板中没有文本内容', error: true);
+      showErrorSnack(context, const ApiException('剪贴板中没有文本内容'));
       return;
     }
     _textController.text = text;
@@ -173,7 +175,7 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
     await Clipboard.setData(
         ClipboardData(text: FirewallRuleTable.csvTemplate));
     if (!mounted) return;
-    showSnack(context, '模板已复制到剪贴板');
+    showSuccessSnack(context, '模板已复制到剪贴板');
   }
 
   Future<void> _createParsedRules() async {
@@ -187,7 +189,7 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
           '过程中请勿退出本页。',
       confirmText: '开始导入',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       _creating = true;
@@ -214,7 +216,7 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
       } catch (e) {
         failures.add(
           '${FirewallLabels.protocol(rule.protocol)} ${rule.portLabel}：'
-          '${errorMessage(e)}',
+          '${describeError(e)}',
         );
       }
       if (!mounted) return;
@@ -236,15 +238,14 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
       ],
       error: succeeded == 0,
     );
-    showSnack(context, '导入完成：成功 $succeeded 条');
-  }
-
-  static String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (succeeded == 0) {
+      showErrorSnack(
+        context,
+        ApiException('导入失败：${parsed.rules.length} 条规则均未写入'),
+      );
+    } else {
+      showSuccessSnack(context, '导入完成：成功 $succeeded 条');
     }
-    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
   }
 
   @override
@@ -253,230 +254,250 @@ class _FirewallImportPageState extends ConsumerState<FirewallImportPage> {
     final parsed = _parsed;
     final busy = _uploading || _creating;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('导入端口规则')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
-        children: [
-          SectionCard(
-            title: '方式一：上传面板导出的 xlsx',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '直接上传由面板导出的 firewall_rules.xlsx，'
-                  '面板按表头定位列（列顺序可变），必须包含 port_start 列。',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: busy ? null : _pickAndUpload,
-                  icon: _uploading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.upload_file_outlined),
-                  label: Text(_uploading ? '上传中…' : '选择文件并导入'),
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '方式二：粘贴表格文本',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '支持 CSV 或从表格软件复制的制表符文本，第一行必须是表头：\n'
-                  '${kFirewallRuleColumns.join(',')}\n'
-                  '除 port_start 外均可留空，缺省为 normal / ipv4 / tcp / accept / in。',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _textController,
-                  minLines: 5,
-                  maxLines: 12,
-                  enabled: !busy,
-                  keyboardType: TextInputType.multiline,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(fontFamily: 'monospace'),
-                  decoration: const InputDecoration(
-                    labelText: '规则表格',
-                    alignLabelWithHint: true,
-                    hintText: 'type,family,protocol,port_start,port_end,'
-                        'address,strategy,direction',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) {
-                    if (_parsed != null || _parseError != null) {
-                      setState(() {
-                        _parsed = null;
-                        _parseError = null;
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: busy ? null : _pasteFromClipboard,
-                      icon: const Icon(Icons.content_paste),
-                      label: const Text('从剪贴板粘贴'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: busy ? null : _copyTemplate,
-                      icon: const Icon(Icons.copy_outlined),
-                      label: const Text('复制模板'),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: busy ? null : _parseText,
-                      icon: const Icon(Icons.fact_check_outlined),
-                      label: const Text('解析并预览'),
-                    ),
-                  ],
-                ),
-                if (_parseError != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _parseError!,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (parsed != null)
+    // 导入是逐条提交的长流程，中途返回会让剩余规则悄悄不写入
+    // （循环里的 `!mounted` 直接 return），因此在途时拦截返回并说明后果。
+    return PopScope<Object?>(
+      canPop: !busy,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        final abort = await showConfirmDialog(
+          context,
+          title: '中断导入？',
+          content: '还有规则没有写入防火墙，现在返回会中断剩余条目的导入，'
+              '已写入的规则不会回滚。',
+          confirmText: '中断导入',
+          cancelText: '继续导入',
+          danger: true,
+        );
+        if (!abort) return;
+        if (navigator.mounted) navigator.pop(result);
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('导入端口规则')),
+        body: ListView(
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
             SectionCard(
-              title: '待导入规则（${parsed.rules.length} 条）',
+              title: '方式一：上传面板导出的 xlsx',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (parsed.rules.isEmpty)
-                    Text(
-                      '没有解析出可导入的规则。',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    )
-                  else
-                    for (final rule in parsed.rules.take(50))
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '${FirewallLabels.protocol(rule.protocol)} '
-                                '${rule.portLabel}'
-                                '${rule.address.isEmpty ? '' : ' · ${rule.address}'}',
-                                style: theme.textTheme.bodyMedium,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            TagChip(
-                              label: FirewallLabels.direction(rule.direction),
-                              color: theme.colorScheme.tertiary,
-                            ),
-                            const SizedBox(width: 6),
-                            TagChip(
-                              label: FirewallLabels.strategy(rule.strategy),
-                              color: rule.strategy == 'accept'
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.error,
-                            ),
-                          ],
-                        ),
-                      ),
-                  if (parsed.rules.length > 50)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        '仅预览前 50 条，导入时会提交全部 ${parsed.rules.length} 条。',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
+                  Text(
+                    '直接上传由面板导出的 firewall_rules.xlsx，'
+                    '面板按表头定位列（列顺序可变），必须包含 port_start 列。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  if (parsed.errors.isNotEmpty) ...[
-                    const Divider(height: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: busy ? null : _pickAndUpload,
+                    icon: _uploading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.upload_file_outlined),
+                    label: Text(_uploading ? '上传中…' : '选择文件并导入'),
+                  ),
+                ],
+              ),
+            ),
+            SectionCard(
+              title: '方式二：粘贴表格文本',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '支持 CSV 或从表格软件复制的制表符文本，第一行必须是表头：\n'
+                    '${kFirewallRuleColumns.join(',')}\n'
+                    '除 port_start 外均可留空，缺省为 normal / ipv4 / tcp / accept / in。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _textController,
+                    minLines: 5,
+                    maxLines: 12,
+                    enabled: !busy,
+                    keyboardType: TextInputType.multiline,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontFamily: 'monospace'),
+                    decoration: const InputDecoration(
+                      labelText: '规则表格',
+                      alignLabelWithHint: true,
+                      hintText: 'type,family,protocol,port_start,port_end,'
+                          'address,strategy,direction',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) {
+                      if (_parsed != null || _parseError != null) {
+                        setState(() {
+                          _parsed = null;
+                          _parseError = null;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : _pasteFromClipboard,
+                        icon: const Icon(Icons.content_paste),
+                        label: const Text('从剪贴板粘贴'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : _copyTemplate,
+                        icon: const Icon(Icons.copy_outlined),
+                        label: const Text('复制模板'),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: busy ? null : _parseText,
+                        icon: const Icon(Icons.fact_check_outlined),
+                        label: const Text('解析并预览'),
+                      ),
+                    ],
+                  ),
+                  if (_parseError != null) ...[
+                    const SizedBox(height: 12),
                     Text(
-                      '${parsed.errors.length} 行存在问题，将被跳过：',
-                      style: theme.textTheme.bodyMedium
+                      _parseError!,
+                      style: theme.textTheme.bodySmall
                           ?.copyWith(color: theme.colorScheme.error),
                     ),
-                    const SizedBox(height: 4),
-                    for (final message in parsed.errors.take(10))
+                  ],
+                ],
+              ),
+            ),
+            if (parsed != null)
+              SectionCard(
+                title: '待导入规则（${parsed.rules.length} 条）',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (parsed.rules.isEmpty)
                       Text(
-                        message,
-                        style: theme.textTheme.bodySmall?.copyWith(
+                        '没有解析出可导入的规则。',
+                        style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
+                      )
+                    else
+                      for (final rule in parsed.rules.take(50))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${FirewallLabels.protocol(rule.protocol)} '
+                                  '${rule.portLabel}'
+                                  '${rule.address.isEmpty ? '' : ' · ${rule.address}'}',
+                                  style: theme.textTheme.bodyMedium,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              TagChip(
+                                label: FirewallLabels.direction(rule.direction),
+                                color: theme.colorScheme.tertiary,
+                              ),
+                              const SizedBox(width: 6),
+                              TagChip(
+                                label: FirewallLabels.strategy(rule.strategy),
+                                color: rule.strategy == 'accept'
+                                    ? theme.colorScheme.primary
+                                    : theme.colorScheme.error,
+                              ),
+                            ],
+                          ),
+                        ),
+                    if (parsed.rules.length > 50)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '仅预览前 50 条，导入时会提交全部 ${parsed.rules.length} 条。',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
-                    if (parsed.errors.length > 10)
+                    if (parsed.errors.isNotEmpty) ...[
+                      const Divider(height: 24),
                       Text(
-                        '… 其余 ${parsed.errors.length - 10} 行同样被跳过',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                        '${parsed.errors.length} 行存在问题，将被跳过：',
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: theme.colorScheme.error),
+                      ),
+                      const SizedBox(height: 4),
+                      for (final message in parsed.errors.take(10))
+                        Text(
+                          message,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      if (parsed.errors.length > 10)
+                        Text(
+                          '… 其余 ${parsed.errors.length - 10} 行同样被跳过',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: 12),
+                    if (_creating) ...[
+                      LinearProgressIndicator(
+                        value: _createdTotal == 0
+                            ? null
+                            : _createdDone / _createdTotal,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '正在导入 $_createdDone / $_createdTotal…',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ] else
+                      FilledButton.icon(
+                        onPressed: parsed.rules.isEmpty || busy
+                            ? null
+                            : _createParsedRules,
+                        icon: const Icon(Icons.playlist_add_check),
+                        label: Text('导入 ${parsed.rules.length} 条规则'),
+                      ),
+                  ],
+                ),
+              ),
+            if (_resultTitle != null)
+              SectionCard(
+                title: _resultTitle,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final line in _resultDetails)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          line,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: _resultIsError
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.onSurface,
+                          ),
                         ),
                       ),
                   ],
-                  const SizedBox(height: 12),
-                  if (_creating) ...[
-                    LinearProgressIndicator(
-                      value: _createdTotal == 0
-                          ? null
-                          : _createdDone / _createdTotal,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '正在导入 $_createdDone / $_createdTotal…',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ] else
-                    FilledButton.icon(
-                      onPressed: parsed.rules.isEmpty || busy
-                          ? null
-                          : _createParsedRules,
-                      icon: const Icon(Icons.playlist_add_check),
-                      label: Text('导入 ${parsed.rules.length} 条规则'),
-                    ),
-                ],
+                ),
               ),
-            ),
-          if (_resultTitle != null)
-            SectionCard(
-              title: _resultTitle,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final line in _resultDetails)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        line,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: _resultIsError
-                              ? theme.colorScheme.error
-                              : theme.colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

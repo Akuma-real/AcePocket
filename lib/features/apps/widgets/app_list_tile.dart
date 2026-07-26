@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/app_item.dart';
 
 /// 应用商店列表项。
@@ -255,9 +256,15 @@ class _MetaChip extends StatelessWidget {
       children: [
         Icon(icon, size: 14, color: color),
         const SizedBox(width: 3),
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(color: color),
+        // Wrap 给子项的是宽度上界为整行的松约束，Row 内非 Flexible 的 Text
+        // 会以无限宽度布局：版本号 / 分类名较长时会直接溢出。
+        Flexible(
+          child: Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(color: color),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ],
     );
@@ -292,19 +299,28 @@ class _ActionRow extends StatelessWidget {
       children: [
         if (app.installed)
           Expanded(
-            child: Row(
-              children: [
-                Text(
-                  '首页显示',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+            child: a11ySwitch(
+              // 读屏播报「<应用> 在面板首页的显示」+ 开关自身的开 / 关状态，
+              // 避免同屏多个同名开关无法区分。
+              label: '${app.name.isEmpty ? app.slug : app.name} 在面板首页的显示',
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      '首页显示',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                Switch(
-                  value: app.show,
-                  onChanged: busy ? null : onToggleShow,
-                ),
-              ],
+                  Switch(
+                    value: app.show,
+                    onChanged: busy ? null : onToggleShow,
+                  ),
+                ],
+              ),
             ),
           )
         else
@@ -336,8 +352,8 @@ class _ActionRow extends StatelessWidget {
           ),
         ],
         if (app.customSupported)
-          IconButton(
-            tooltip: '自定义编译参数',
+          A11yIconButton(
+            tooltip: '编辑 ${app.name.isEmpty ? app.slug : app.name} 的编译参数',
             onPressed: busy ? null : onCustom,
             icon: const Icon(Icons.tune, size: 20),
           ),

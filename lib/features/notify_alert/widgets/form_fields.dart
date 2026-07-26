@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// 底部选择器的一个选项。
 class PickerOption<T> {
   const PickerOption({
@@ -47,10 +49,18 @@ Future<T?> showOptionPicker<T>(
                     final option = options[index];
                     final isSelected = option.value == selected;
                     return ListTile(
-                      title: Text(option.label),
+                      title: Text(
+                        option.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       subtitle: option.subtitle == null
                           ? null
-                          : Text(option.subtitle!),
+                          : Text(
+                              option.subtitle!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                       trailing: isSelected
                           ? Icon(Icons.check, color: theme.colorScheme.primary)
                           : null,
@@ -324,8 +334,8 @@ class _StringListFieldState extends State<StringListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 行',
                   onPressed: () => _removeAt(i),
                   icon: const Icon(Icons.remove_circle_outline),
                   color: theme.colorScheme.error,

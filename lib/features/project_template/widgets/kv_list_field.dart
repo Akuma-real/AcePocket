@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/kv_pair.dart';
 
 /// 键值对动态输入列表（对应面板前端的 n-dynamic-input preset="pair"）。
@@ -152,8 +153,8 @@ class _KvListFieldState extends State<KvListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 行${widget.label}',
                   onPressed: () => _removeAt(i),
                   icon: Icon(
                     Icons.remove_circle_outline,

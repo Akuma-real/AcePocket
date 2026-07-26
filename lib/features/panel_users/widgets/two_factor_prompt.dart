@@ -191,6 +191,8 @@ class _TwoFactorPromptDialogState extends State<TwoFactorPromptDialog> {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
+                      // 面板返回的验证码是白底黑字 PNG，深色主题下必须垫白底才看得清，
+                      // 因此这里固定用白色而非主题色。
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(6),
                     ),
@@ -198,10 +200,14 @@ class _TwoFactorPromptDialogState extends State<TwoFactorPromptDialog> {
                       captchaBytes,
                       height: 50,
                       fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const SizedBox(
-                        height: 50,
-                        child: Center(child: Text('验证码图片加载失败')),
+                      // 失败占位不设固定高度：大字号下 50dp 装不下提示语会溢出。
+                      errorBuilder: (context, error, stackTrace) => const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: Text(
+                          '验证码图片加载失败',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.black87),
+                        ),
                       ),
                     ),
                   ),

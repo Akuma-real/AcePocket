@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../models/database_user.dart';
@@ -72,11 +73,11 @@ class _DatabasePasswordSheetState extends ConsumerState<DatabasePasswordSheet> {
   Future<void> _submit() async {
     final user = _selected;
     if (user == null) {
-      showMessage(context, '请先选择要改密的用户', error: true);
+      showErrorSnack(context, '请先选择要改密的用户');
       return;
     }
     if (_password.text.isEmpty) {
-      showMessage(context, '请填写新密码', error: true);
+      showErrorSnack(context, '请填写新密码');
       return;
     }
 
@@ -153,12 +154,18 @@ class _DatabasePasswordSheetState extends ConsumerState<DatabasePasswordSheet> {
               for (final user in users)
                 DropdownMenuItem(
                   value: user.id,
-                  child: Text(_userLabel(user), overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    _userLabel(user),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
             ],
-            onChanged: (id) => setState(
-              () => _selected = users.firstWhere((u) => u.id == id),
-            ),
+            // firstWhere 在 id 为 null 时会抛 StateError，先挡掉。
+            onChanged: (id) {
+              if (id == null) return;
+              setState(() => _selected = users.firstWhere((u) => u.id == id));
+            },
           ),
         if (users.isNotEmpty)
           PasswordField(

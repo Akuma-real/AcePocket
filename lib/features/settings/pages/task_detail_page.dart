@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -29,12 +31,15 @@ class TaskDetailPage extends ConsumerStatefulWidget {
 class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   bool _busy = false;
 
-  void _toast(String message) {
+  void _ok(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    showSuccessSnack(context, message);
   }
 
-  String _errorText(Object e) => e is ApiException ? e.message : '$e';
+  void _fail(Object error) {
+    if (!mounted) return;
+    showErrorSnack(context, error);
+  }
 
   void _refresh(TaskItem? task) {
     ref.invalidate(taskDetailProvider(widget.taskId));
@@ -44,74 +49,77 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   }
 
   Future<void> _cancel(TaskItem task) async {
+    if (_busy) return;
     final ok = await showConfirmDialog(
       context,
       title: '取消任务',
       content: '确定要取消任务「${task.name.isEmpty ? '#${task.id}' : task.name}」吗？'
           '\n面板会尝试终止正在执行的操作，可能导致该操作处于中间状态。',
       confirmText: '取消任务',
+      cancelText: '继续执行',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(taskRepoProvider).cancel(task.id);
       _refresh(task);
       ref.invalidate(taskListProvider);
-      _toast('已发送取消请求');
+      _ok('已发送取消请求');
     } catch (e) {
-      _toast('取消失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _delete(TaskItem task) async {
+    if (_busy) return;
     final ok = await showConfirmDialog(
       context,
       title: '删除任务',
       content: '确定要删除任务「${task.name.isEmpty ? '#${task.id}' : task.name}」的记录吗？',
-      confirmText: '删除',
+      confirmText: '删除记录',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(taskRepoProvider).delete(task.id);
       ref.invalidate(taskListProvider);
       if (!mounted) return;
-      _toast('任务记录已删除');
+      _ok('任务记录已删除');
       if (context.canPop()) {
         context.pop();
       } else {
         context.go('/tasks');
       }
     } catch (e) {
-      _toast('删除失败：${_errorText(e)}');
+      _fail(e);
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _clearLog(TaskItem task) async {
-    if (task.log.isEmpty) return;
+    if (_busy || task.log.isEmpty) return;
     final ok = await showConfirmDialog(
       context,
       title: '清空日志',
       content: '确定要清空日志文件 ${task.log} 吗？该操作不可撤销。',
-      confirmText: '清空',
+      confirmText: '清空日志',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
       await ref.read(taskRepoProvider).truncateLog(task.log);
       ref.invalidate(taskLogProvider(task.log));
-      _toast('日志已清空');
+      _ok('日志已清空');
     } catch (e) {
-      _toast('清空失败：${_errorText(e)}');
+      _fail(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -125,8 +133,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
       appBar: AppBar(
         title: Text('任务 #${widget.taskId}'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新任务详情',
             icon: const Icon(Icons.refresh),
             onPressed: () => _refresh(taskAsync.valueOrNull),
           ),
@@ -263,8 +271,8 @@ class _TaskLogCard extends ConsumerWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '复制日志',
+          A11yIconButton(
+            tooltip: '复制任务日志',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.copy_outlined, size: 18),
             onPressed: logAsync.valueOrNull == null
@@ -274,19 +282,17 @@ class _TaskLogCard extends ConsumerWidget {
                       ClipboardData(text: logAsync.value!.text),
                     );
                     if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('日志已复制')),
-                    );
+                    showSuccessSnack(context, '日志已复制到剪贴板');
                   },
           ),
-          IconButton(
-            tooltip: '刷新日志',
+          A11yIconButton(
+            tooltip: '刷新任务日志',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.refresh, size: 18),
             onPressed: () => ref.invalidate(taskLogProvider(task.log)),
           ),
-          IconButton(
-            tooltip: '清空日志',
+          A11yIconButton(
+            tooltip: '清空任务日志',
             visualDensity: VisualDensity.compact,
             icon: Icon(
               Icons.delete_sweep_outlined,
@@ -312,7 +318,9 @@ class _TaskLogCard extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              error is ApiException ? error.message : '$error',
+              describeError(error),
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.error,
               ),

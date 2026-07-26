@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/alert_metric.dart';
 import '../models/alert_rule.dart';
 import '../providers/notify_alert_providers.dart';
 import '../widgets/channel_selector.dart';
 import '../widgets/form_fields.dart';
-import '../widgets/snack.dart';
 
 /// 告警规则表单页 `/alerts/rules/new` 与 `/alerts/rules/:id/edit`。
 class AlertRuleFormPage extends ConsumerStatefulWidget {
@@ -34,6 +35,15 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
   bool _initialized = false;
   bool _saving = false;
 
+  /// 表单是否有未保存的修改（与加载时的原始值逐项比较，改回原样即视为未修改）。
+  bool _dirty = false;
+
+  /// [_apply] 填充控件期间不计入修改（否则回填 controller 会误判为脏）。
+  bool _applying = false;
+
+  /// 原始值快照。
+  String _pristine = '';
+
   String _type = 'cpu';
   String _op = 'gt';
   List<int> _channels = <int>[];
@@ -44,7 +54,35 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
   @override
   void initState() {
     super.initState();
+    for (final controller in <TextEditingController>[
+      _nameController,
+      _targetController,
+      _thresholdController,
+      _durationController,
+      _silenceController,
+    ]) {
+      controller.addListener(_onFieldChanged);
+    }
     if (!_isEdit) _apply(AlertRule.empty());
+  }
+
+  /// 当前表单值的快照，用于判断是否有未保存的修改。
+  String _snapshot() => <String>[
+        _nameController.text.trim(),
+        _targetController.text.trim(),
+        _thresholdController.text.trim(),
+        _durationController.text.trim(),
+        _silenceController.text.trim(),
+        _type,
+        _op,
+        '$_enabled',
+        (List<int>.from(_channels)..sort()).join(','),
+      ].join('\u0000');
+
+  void _onFieldChanged() {
+    if (_applying) return;
+    final dirty = _snapshot() != _pristine;
+    if (dirty != _dirty && mounted) setState(() => _dirty = dirty);
   }
 
   @override
@@ -58,6 +96,7 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
   }
 
   void _apply(AlertRule rule) {
+    _applying = true;
     _nameController.text = rule.name;
     _targetController.text = rule.target;
     _thresholdController.text = formatThreshold(rule.threshold);
@@ -68,6 +107,9 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
     _channels = List<int>.from(rule.channels);
     _enabled = rule.enabled;
     _initialized = true;
+    _pristine = _snapshot();
+    _dirty = false;
+    _applying = false;
   }
 
   /// 切换指标时按语义重置目标与默认条件（与面板前端一致）。
@@ -85,6 +127,7 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
       _op = meta.defaultOperator;
       _thresholdController.text = formatThreshold(meta.defaultThreshold);
     });
+    _onFieldChanged();
   }
 
   Future<void> _pickMetric() async {
@@ -107,12 +150,13 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
   int? _parseInt(String text) => int.tryParse(text.trim());
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final meta = alertMetricOf(_type);
     final target = _targetController.text.trim();
     if (meta.targetMode == AlertTargetMode.required && target.isEmpty) {
-      showSnack(context, '请填写目标（${meta.targetHint}）', error: true);
+      showErrorSnack(context, '请填写目标（${meta.targetHint}）');
       return;
     }
 
@@ -142,7 +186,8 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
         await repo.createAlertRule(rule);
       }
       if (!mounted) return;
-      showSnack(context, _isEdit ? '规则已保存' : '规则已创建');
+      _dirty = false;
+      showSuccessSnack(context, _isEdit ? '规则已保存' : '规则已创建');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -174,32 +219,36 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
       _apply(async.requireValue);
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 96),
-          children: [
-            _basicCard(),
-            _conditionCard(),
-            _notifyCard(),
-          ],
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '规则尚未保存，返回后填写的内容会丢失。确定放弃吗？',
+      child: Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 96),
+            children: [
+              _basicCard(),
+              _conditionCard(),
+              _notifyCard(),
+            ],
+          ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(_saving ? '保存中…' : '保存'),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_saving ? '保存中…' : '保存'),
+            ),
           ),
         ),
       ),
@@ -251,7 +300,10 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
           const SizedBox(height: 8),
           SwitchListTile(
             value: _enabled,
-            onChanged: (value) => setState(() => _enabled = value),
+            onChanged: (value) {
+              setState(() => _enabled = value);
+              _onFieldChanged();
+            },
             title: const Text('启用规则'),
             subtitle: const Text('停用后不再检查该指标'),
             contentPadding: EdgeInsets.zero,
@@ -299,8 +351,10 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
                   visualDensity: VisualDensity.compact,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                onSelectionChanged: (selection) =>
-                    setState(() => _op = selection.first),
+                onSelectionChanged: (selection) {
+                  setState(() => _op = selection.first);
+                  _onFieldChanged();
+                },
               ),
             ),
             const SizedBox(height: 6),
@@ -394,7 +448,11 @@ class _AlertRuleFormPageState extends ConsumerState<AlertRuleFormPage> {
           const SizedBox(height: 4),
           ChannelSelector(
             selected: _channels,
-            onChanged: (value) => setState(() => _channels = value),
+            enabled: !_saving,
+            onChanged: (value) {
+              setState(() => _channels = value);
+              _onFieldChanged();
+            },
           ),
         ],
       ),

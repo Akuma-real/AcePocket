@@ -5,6 +5,7 @@ import '../../../core/storage/server_store.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/backup_storage.dart';
 import '../providers/storage_providers.dart';
 import '../widgets/feedback.dart';
@@ -56,12 +57,50 @@ class _BackupStorageEditPageState
   Object? _loadError;
   bool _saving = false;
 
+  /// 是否有未保存的修改（用于返回拦截）。
+  bool _dirty = false;
+
+  /// 由代码（加载已有配置）而非用户输入引起的变更，不计入 [_dirty]。
+  bool _suppressDirty = false;
+
   bool get _isEdit => widget.id != null;
+
+  /// 全部输入控制器，便于统一挂 / 摘监听与释放。
+  List<TextEditingController> get _controllers => [
+        _nameController,
+        _accessKeyController,
+        _secretKeyController,
+        _regionController,
+        _endpointController,
+        _bucketController,
+        _urlController,
+        _hostController,
+        _portController,
+        _usernameController,
+        _passwordController,
+        _privateKeyController,
+        _pathController,
+      ];
 
   @override
   void initState() {
     super.initState();
+    for (final controller in _controllers) {
+      controller.addListener(_markDirty);
+    }
     if (_isEdit) _load();
+  }
+
+  /// 标记「有未保存的修改」；已标记或处于抑制期时为空操作。
+  void _markDirty() {
+    if (_suppressDirty || _dirty || !mounted) return;
+    setState(() => _dirty = true);
+  }
+
+  /// 下拉框等非文本字段变更的统一入口：改状态 + 标脏。
+  void _updateField(VoidCallback change) {
+    setState(change);
+    _markDirty();
   }
 
   @override
@@ -92,6 +131,7 @@ class _BackupStorageEditPageState
           await ref.read(backupStorageRepoProvider).get(widget.id!);
       if (!mounted) return;
       final info = storage.info;
+      _suppressDirty = true;
       setState(() {
         _nameController.text = storage.name;
         _type = BackupStorageTypes.creatable.contains(storage.type)
@@ -113,7 +153,9 @@ class _BackupStorageEditPageState
         _pathController.text = info.path;
         _sftpAuth = info.privateKey.isNotEmpty ? 'private_key' : 'password';
         _loading = false;
+        _dirty = false;
       });
+      _suppressDirty = false;
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -126,30 +168,36 @@ class _BackupStorageEditPageState
   @override
   Widget build(BuildContext context) {
     final server = ref.watch(activeServerProvider);
-    return Scaffold(
-      appBar: AppBar(title: Text(_isEdit ? '编辑备份存储' : '添加备份存储')),
-      body: server == null
-          ? const NoServerView()
-          : _loading
-              ? const LoadingView(message: '正在加载存储配置…')
-              : _loadError != null
-                  ? ErrorView(error: _loadError!, onRetry: _load)
-                  : _buildForm(),
-      bottomNavigationBar: server == null || _loading || _loadError != null
-          ? null
-          : SafeArea(
-              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: FilledButton(
-                onPressed: _saving ? null : _submit,
-                child: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(_isEdit ? '保存' : '创建'),
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty && !_saving,
+      message: _isEdit
+          ? '存储配置的修改还没有保存，确定放弃吗？'
+          : '新建的存储还没有创建，确定放弃吗？',
+      child: Scaffold(
+        appBar: AppBar(title: Text(_isEdit ? '编辑备份存储' : '添加备份存储')),
+        body: server == null
+            ? const NoServerView()
+            : _loading
+                ? const LoadingView(message: '正在加载存储配置…')
+                : _loadError != null
+                    ? ErrorView(error: _loadError!, onRetry: _load)
+                    : _buildForm(),
+        bottomNavigationBar: server == null || _loading || _loadError != null
+            ? null
+            : SafeArea(
+                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: FilledButton(
+                  onPressed: _saving ? null : _submit,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(_isEdit ? '保存' : '创建'),
+                ),
               ),
-            ),
+      ),
     );
   }
 
@@ -184,7 +232,7 @@ class _BackupStorageEditPageState
                   ],
                   onChanged: (v) {
                     if (v == null) return;
-                    setState(() {
+                    _updateField(() {
                       _type = v;
                       if (v == BackupStorageTypes.sftp &&
                           _portController.text.trim().isEmpty) {
@@ -236,7 +284,7 @@ class _BackupStorageEditPageState
               ),
               DropdownMenuItem(value: 'path', child: Text('Path')),
             ],
-            onChanged: (v) => setState(() => _style = v ?? 'virtual-hosted'),
+            onChanged: (v) => _updateField(() => _style = v ?? 'virtual-hosted'),
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -266,7 +314,7 @@ class _BackupStorageEditPageState
               DropdownMenuItem(value: 'https', child: Text('HTTPS')),
               DropdownMenuItem(value: 'http', child: Text('HTTP')),
             ],
-            onChanged: (v) => setState(() => _scheme = v ?? 'https'),
+            onChanged: (v) => _updateField(() => _scheme = v ?? 'https'),
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -328,7 +376,7 @@ class _BackupStorageEditPageState
               DropdownMenuItem(value: 'password', child: Text('密码')),
               DropdownMenuItem(value: 'private_key', child: Text('私钥')),
             ],
-            onChanged: (v) => setState(() => _sftpAuth = v ?? 'password'),
+            onChanged: (v) => _updateField(() => _sftpAuth = v ?? 'password'),
           ),
           const SizedBox(height: 16),
           if (_sftpAuth == 'password')
@@ -444,6 +492,7 @@ class _BackupStorageEditPageState
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     final form = _formKey.currentState;
     if (form == null || !form.validate()) return;
 
@@ -465,7 +514,8 @@ class _BackupStorageEditPageState
         );
       }
       if (!mounted) return;
-      showSnack(context, _isEdit ? '已保存' : '创建成功');
+      _dirty = false;
+      showSuccessSnack(context, _isEdit ? '已保存' : '创建成功');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);

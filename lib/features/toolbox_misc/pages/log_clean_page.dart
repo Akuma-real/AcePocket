@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/utils/format.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/log_models.dart';
 import '../providers/toolbox_misc_providers.dart';
-import '../widgets/toolbox_dialogs.dart';
 import '../widgets/toolbox_tiles.dart';
 
 /// 日志清理页：按类型扫描可清理内容并释放磁盘空间。
@@ -49,10 +51,10 @@ class _LogCleanPageState extends ConsumerState<LogCleanPage> {
     try {
       final cleaned = await ref.read(logCleanProvider.notifier).clean(type.key);
       if (!mounted) return;
-      showSnack(context, '${type.title}已清理，释放 $cleaned');
+      showSuccessSnack(context, '${type.title}已清理，释放 $cleaned');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     }
   }
 
@@ -71,10 +73,10 @@ class _LogCleanPageState extends ConsumerState<LogCleanPage> {
         final cleaned =
             await ref.read(logCleanProvider.notifier).clean(type.key);
         if (!mounted) return;
-        showSnack(context, '${type.title}已清理，释放 $cleaned');
+        showSuccessSnack(context, '${type.title}已清理，释放 $cleaned');
       } catch (e) {
         if (!mounted) return;
-        showSnack(context, '${type.title}清理失败：${errorMessage(e)}', error: true);
+        showErrorSnack(context, '${type.title}清理失败：${describeError(e)}');
       }
     }
   }
@@ -242,7 +244,7 @@ class _LogCleanPageState extends ConsumerState<LogCleanPage> {
           if (state.error != null) ...[
             const SizedBox(height: 10),
             SectionErrorTile(
-              message: errorMessage(state.error!),
+              message: describeError(state.error!),
               onRetry: () => notifier.scan(type.key),
             ),
           ] else if (state.scanned && state.items.isEmpty) ...[

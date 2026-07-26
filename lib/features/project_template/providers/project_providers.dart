@@ -4,6 +4,7 @@ import '../../../core/storage/server_store.dart';
 import '../models/paged.dart';
 import '../models/project.dart';
 import '../repo/project_repo.dart';
+// PagedState 由本文件转导出 core 的实现。
 import 'paged_list_notifier.dart';
 
 /// 项目模块仓库（依赖当前选中服务器的 ApiClient）。

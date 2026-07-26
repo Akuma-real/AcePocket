@@ -48,6 +48,7 @@ class _DatabaseServerSheetState extends ConsumerState<DatabaseServerSheet> {
   bool _submitting = false;
   String? _nameError;
   String? _hostError;
+  String? _portError;
 
   bool get _isEdit => widget.server != null;
 
@@ -105,13 +106,15 @@ class _DatabaseServerSheetState extends ConsumerState<DatabaseServerSheet> {
     }
     final port = _type == 'sqlite' ? 0 : (int.tryParse(_port.text.trim()) ?? 0);
     if (_type != 'sqlite' && (port < 1 || port > 65535)) {
-      showMessage(context, '端口需为 1-65535 之间的数字', error: true);
+      // 错误挂在端口输入框上，而不是弹一条与字段无关的提示。
+      setState(() => _portError = '端口需为 1-65535');
       return;
     }
 
     setState(() {
       _nameError = null;
       _hostError = null;
+      _portError = null;
       _submitting = true;
     });
 
@@ -219,7 +222,13 @@ class _DatabaseServerSheetState extends ConsumerState<DatabaseServerSheet> {
                 child: TextField(
                   controller: _port,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: '端口'),
+                  decoration: InputDecoration(
+                    labelText: '端口',
+                    errorText: _portError,
+                  ),
+                  onChanged: (_) {
+                    if (_portError != null) setState(() => _portError = null);
+                  },
                 ),
               ),
             ],

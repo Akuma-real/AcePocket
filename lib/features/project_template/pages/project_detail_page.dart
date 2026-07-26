@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -9,7 +12,6 @@ import '../../../core/widgets/section_card.dart';
 import '../models/project.dart';
 import '../providers/project_providers.dart';
 import '../widgets/formatters.dart';
-import '../widgets/snack.dart';
 
 /// 项目详情页 `/projects/:id`。
 ///
@@ -33,10 +35,11 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
   }
 
   Future<void> _run(Future<void> Function() action, String success) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       await action();
-      if (mounted) showSnack(context, success);
+      if (mounted) showSuccessSnack(context, success);
       ref.invalidate(projectDetailProvider(widget.projectId));
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -72,6 +75,22 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
     await _run(() => ref.read(projectRepoProvider).stop(project.name), '已停止');
   }
 
+  Future<void> _restart(ProjectDetail project) async {
+    // 重启会中断正在处理的请求，与「停止」同样需要二次确认。
+    final ok = await showConfirmDialog(
+      context,
+      title: '重启 ${project.name}',
+      content: '重启期间该项目会短暂不可用，确定重启吗？',
+      confirmText: '重启',
+      danger: true,
+    );
+    if (!ok) return;
+    await _run(
+      () => ref.read(projectRepoProvider).restart(project.name),
+      '已重启',
+    );
+  }
+
   Future<void> _delete(ProjectDetail project) async {
     final ok = await showConfirmDialog(
       context,
@@ -82,11 +101,12 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
       danger: true,
     );
     if (!ok) return;
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       await ref.read(projectRepoProvider).delete(project.id);
       if (!mounted) return;
-      showSnack(context, '已删除');
+      showSuccessSnack(context, '已删除项目「${project.name}」');
       context.pop();
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -101,7 +121,11 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(detailAsync.valueOrNull?.name ?? '项目详情'),
+        title: Text(
+          detailAsync.valueOrNull?.name ?? '项目详情',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           if (detailAsync.valueOrNull != null)
             PopupMenuButton<String>(
@@ -117,9 +141,9 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
                       if (mounted) _refresh();
                     });
                   case 'restart':
-                    _run(() => repo.restart(project.name), '已重启');
+                    _restart(project);
                   case 'reload':
-                    _run(() => repo.reload(project.name), '已重载');
+                    _run(() => repo.reload(project.name), '已重载配置');
                   case 'clear_log':
                     _clearLog(project);
                   case 'delete':
@@ -293,12 +317,9 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
                 child: _InfoList(items: [
                   ('内存限制',
                       project.memoryLimit > 0
-                          ? formatBytes(project.memoryLimit)
+                          ? formatBytes(project.memoryLimit, fractionDigits: 1)
                           : '不限制'),
-                  ('CPU 限制',
-                      project.cpuQuota > 0
-                          ? formatPercent(project.cpuQuota)
-                          : '不限制'),
+                  ('CPU 限制', _cpuQuotaLabel(project.cpuQuota)),
                 ]),
               ),
               SectionCard(
@@ -323,6 +344,14 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
 
 String _joinOrDash(List<String> values) =>
     values.isEmpty ? '—' : values.join('\n');
+
+/// CPUQuota 展示：systemd 允许超过 100%（200% 表示 2 个核心），
+/// 因此不能用 core 的 formatPercent（会钳制到 100%）。
+String _cpuQuotaLabel(double quota) {
+  if (quota <= 0) return '不限制';
+  final cores = trimDouble(quota / 100);
+  return '${formatCpuPercent(quota)}（约 $cores 个 CPU 核心）';
+}
 
 class _StatusCard extends StatelessWidget {
   const _StatusCard({
@@ -392,20 +421,26 @@ class _StatusCard extends StatelessWidget {
               runSpacing: 6,
               children: [
                 _Metric(label: 'PID', value: '${project.pid}'),
-                _Metric(label: '内存', value: formatBytes(project.memory)),
-                _Metric(label: 'CPU', value: formatPercent(project.cpu)),
+                _Metric(
+                  label: '内存',
+                  value: formatBytes(project.memory, fractionDigits: 1),
+                ),
+                _Metric(label: 'CPU', value: formatCpuPercent(project.cpu)),
                 if (project.uptime.isNotEmpty)
                   _Metric(label: '运行时长', value: project.uptime),
               ],
             ),
           ],
           const SizedBox(height: 4),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('开机自启'),
-            subtitle: const Text('systemctl enable / disable'),
-            value: project.enabled,
-            onChanged: busy ? null : (_) => onToggleAutostart(),
+          a11ySwitch(
+            label: '项目 ${project.name} 的开机自启',
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('开机自启'),
+              subtitle: const Text('对应 systemctl enable / disable'),
+              value: project.enabled,
+              onChanged: busy ? null : (_) => onToggleAutostart(),
+            ),
           ),
         ],
       ),

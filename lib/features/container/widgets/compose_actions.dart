@@ -27,7 +27,8 @@ Future<bool> composeUpAction(
               Text('将执行 docker compose up -d 启动「$name」。'),
               const SizedBox(height: 4),
               Text(
-                '拉取镜像可能耗时较久，若提示超时可稍后刷新查看状态。',
+                '首次启动需要拉取镜像，可能耗时数分钟，请保持页面打开。'
+                '若仍提示超时，服务器多半还在后台执行，稍后刷新列表即可看到结果。',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

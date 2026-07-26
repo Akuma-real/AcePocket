@@ -1,23 +1,41 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/kv_pair.dart';
 import '../models/project.dart';
 import '../providers/project_providers.dart';
 import '../widgets/formatters.dart';
 import '../widgets/kv_list_field.dart';
-import '../widgets/snack.dart';
 import '../widgets/string_list_field.dart';
 
 /// 项目名称（同时作为 systemd 服务名）的合法字符，与
 /// `request.ProjectCreate` / `request.ProjectUpdate` 的
 /// `regex:"^[a-zA-Z0-9_-]+$"` 一致。
 final RegExp _kProjectNamePattern = RegExp(r'^[a-zA-Z0-9_-]+$');
+
+/// CPUQuota 取值格式：百分比，如 `50%`、`200%`。
+final RegExp _kCpuQuotaPattern = RegExp(r'^\d+(\.\d+)?%$');
+
+/// 校验失败的统一提示（具体错误就地展示在对应输入框下方）。
+const String _kFormInvalidHint = '请先修正标红的输入项';
+
+/// 项目名称校验（新建 / 编辑共用）。
+String? _validateProjectName(String? value) {
+  final name = (value ?? '').trim();
+  if (name.isEmpty) return '请填写项目名称';
+  if (!_kProjectNamePattern.hasMatch(name)) {
+    return '只能包含字母、数字、下划线与短横线';
+  }
+  return null;
+}
 
 /// 项目新建 / 编辑页 `/projects/create`、`/projects/:id/edit`。
 ///
@@ -64,6 +82,7 @@ class _CreateForm extends ConsumerStatefulWidget {
 }
 
 class _CreateFormState extends ConsumerState<_CreateForm> {
+  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _rootDirController = TextEditingController();
@@ -71,31 +90,69 @@ class _CreateFormState extends ConsumerState<_CreateForm> {
   final _execStartController = TextEditingController();
   final _userController = TextEditingController(text: 'www');
 
-  String _type = 'general';
-  String _restart = 'on-failure';
+  static const String _kDefaultUser = 'www';
+  static const String _kDefaultType = 'general';
+  static const String _kDefaultRestart = 'on-failure';
+
+  String _type = _kDefaultType;
+  String _restart = _kDefaultRestart;
   bool _submitting = false;
+
+  /// 已创建成功（离开页面无需再确认）。
+  bool _created = false;
+
+  /// 表单是否被改动过（供返回拦截使用）。
+  bool _dirty = false;
+
+  late final List<TextEditingController> _controllers = [
+    _nameController,
+    _descriptionController,
+    _rootDirController,
+    _workingDirController,
+    _execStartController,
+    _userController,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    for (final controller in _controllers) {
+      controller.addListener(_onFormChanged);
+    }
+  }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _descriptionController.dispose();
-    _rootDirController.dispose();
-    _workingDirController.dispose();
-    _execStartController.dispose();
-    _userController.dispose();
+    for (final controller in _controllers) {
+      controller
+        ..removeListener(_onFormChanged)
+        ..dispose();
+    }
     super.dispose();
   }
 
+  /// 重算「是否有未保存的草稿」，仅在结果变化时 setState。
+  void _onFormChanged() {
+    final dirty = !_created &&
+        (_nameController.text.isNotEmpty ||
+            _descriptionController.text.isNotEmpty ||
+            _rootDirController.text.isNotEmpty ||
+            _workingDirController.text.isNotEmpty ||
+            _execStartController.text.isNotEmpty ||
+            _userController.text != _kDefaultUser ||
+            _type != _kDefaultType ||
+            _restart != _kDefaultRestart);
+    if (dirty != _dirty && mounted) setState(() => _dirty = dirty);
+  }
+
   Future<void> _submit() async {
+    if (_submitting) return;
+    FocusScope.of(context).unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      showErrorSnack(context, _kFormInvalidHint);
+      return;
+    }
     final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      showSnack(context, '请填写项目名称', error: true);
-      return;
-    }
-    if (!_kProjectNamePattern.hasMatch(name)) {
-      showSnack(context, '项目名称只能包含字母、数字、下划线与短横线', error: true);
-      return;
-    }
 
     setState(() => _submitting = true);
     try {
@@ -112,7 +169,10 @@ class _CreateFormState extends ConsumerState<_CreateForm> {
             ),
           );
       if (!mounted) return;
-      showSnack(context, '创建成功');
+      // 创建成功后不再拦截返回。
+      _created = true;
+      _dirty = false;
+      showSuccessSnack(context, '已创建项目「$name」');
       // 创建后直接进入详情，方便继续补全 systemd 配置。
       context.pushReplacement('/projects/${project.id}');
     } catch (e) {
@@ -124,6 +184,15 @@ class _CreateFormState extends ConsumerState<_CreateForm> {
 
   @override
   Widget build(BuildContext context) {
+    // 有草稿时拦截系统返回手势与返回键，避免误触丢失已填写的内容。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '新建项目的内容尚未提交，返回会丢失已填写的内容，确定放弃吗？',
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('新建项目')),
@@ -132,139 +201,154 @@ class _CreateFormState extends ConsumerState<_CreateForm> {
         label: '创建项目',
         onSubmit: _submit,
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 24),
-        children: [
-          SectionCard(
-            title: '基本信息',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _nameController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_-]')),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: '项目名称',
-                    hintText: '仅字母、数字、下划线与短横线，同时作为服务名',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
+          children: [
+            SectionCard(
+              title: '基本信息',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _nameController,
+                    enabled: !_submitting,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: _validateProjectName,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_-]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: '项目名称',
+                      hintText: '仅字母、数字、下划线与短横线，同时作为服务名',
+                      errorMaxLines: 2,
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: _type,
-                  decoration: const InputDecoration(
-                    labelText: '项目类型',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: _type,
+                    decoration: const InputDecoration(
+                      labelText: '项目类型',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProjectTypeOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _type = value);
+                            _onFormChanged();
+                          },
                   ),
-                  items: [
-                    for (final item in kProjectTypeOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _type = value);
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _descriptionController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: '项目描述',
-                    hintText: '写入 systemd 的 Description，可留空',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _descriptionController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: '项目描述',
+                      hintText: '写入 systemd 的 Description，可留空',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '目录与运行',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _rootDirController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '项目目录',
-                    hintText: '留空时由面板取「项目默认目录 / 项目名」',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _workingDirController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '运行目录',
-                    hintText: '留空则与项目目录相同',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _execStartController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '启动命令',
-                    hintText: '如 /usr/bin/node /www/app/main.js',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _userController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '运行用户',
-                    hintText: '留空则以 root 运行',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: _restart,
-                  decoration: const InputDecoration(
-                    labelText: '重启策略',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    for (final item in kProjectRestartOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _restart = value);
-                  },
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-            child: Text(
-              '创建后可在编辑页配置环境变量、日志输出、依赖顺序、资源限制与安全加固。',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                ],
               ),
             ),
-          ),
-        ],
+            SectionCard(
+              title: '目录与运行',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _rootDirController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: '项目目录',
+                      hintText: '留空时由面板取「项目默认目录 / 项目名」',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _workingDirController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: '运行目录',
+                      hintText: '留空则与项目目录相同',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _execStartController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: '启动命令',
+                      hintText: '如 /usr/bin/node /www/app/main.js',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _userController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: '运行用户',
+                      hintText: '留空则以 root 运行',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: _restart,
+                    decoration: const InputDecoration(
+                      labelText: '重启策略',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProjectRestartOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _restart = value);
+                            _onFormChanged();
+                          },
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+              child: Text(
+                '创建后可在编辑页配置环境变量、日志输出、依赖顺序、资源限制与安全加固。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -312,17 +396,17 @@ class _EditFormState extends ConsumerState<_EditForm> {
       TextEditingController(text: '${widget.project.timeoutStartSec}');
   late final TextEditingController _timeoutStopController =
       TextEditingController(text: '${widget.project.timeoutStopSec}');
+  /// 内存限制初始文本（MB）；与当前输入比较即可判断是否被改动。
+  late final String _initialMemoryText = widget.project.memoryLimit > 0
+      ? trimDouble(widget.project.memoryLimit / (1024 * 1024))
+      : '0';
+  late final String _initialCpuQuotaText = widget.project.cpuQuota > 0
+      ? '${trimDouble(widget.project.cpuQuota)}%'
+      : '';
   late final TextEditingController _memoryLimitController =
-      TextEditingController(
-    text: widget.project.memoryLimit > 0
-        ? trimDouble(widget.project.memoryLimit / (1024 * 1024))
-        : '0',
-  );
-  late final TextEditingController _cpuQuotaController = TextEditingController(
-    text: widget.project.cpuQuota > 0
-        ? '${trimDouble(widget.project.cpuQuota)}%'
-        : '',
-  );
+      TextEditingController(text: _initialMemoryText);
+  late final TextEditingController _cpuQuotaController =
+      TextEditingController(text: _initialCpuQuotaText);
   late final TextEditingController _standardOutputFileController =
       TextEditingController(text: _initialOutputFile(widget.project.standardOutput));
   late final TextEditingController _standardErrorFileController =
@@ -355,7 +439,89 @@ class _EditFormState extends ConsumerState<_EditForm> {
   late bool _protectTmp = widget.project.protectTmp;
   late bool _protectHome = widget.project.protectHome;
 
+  final _formKey = GlobalKey<FormState>();
+
   bool _submitting = false;
+
+  /// 已保存成功（离开页面无需再确认）。
+  bool _saved = false;
+
+  /// 表单是否被改动过（供返回拦截使用）。
+  bool _dirty = false;
+
+  late final List<TextEditingController> _controllers = [
+    _nameController,
+    _descriptionController,
+    _rootDirController,
+    _workingDirController,
+    _execStartPreController,
+    _execStartController,
+    _execStartPostController,
+    _execStopController,
+    _execReloadController,
+    _userController,
+    _restartSecController,
+    _restartMaxController,
+    _timeoutStartController,
+    _timeoutStopController,
+    _memoryLimitController,
+    _cpuQuotaController,
+    _standardOutputFileController,
+    _standardErrorFileController,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    for (final controller in _controllers) {
+      controller.addListener(_onFormChanged);
+    }
+  }
+
+  /// 重算「是否有未保存的修改」（与加载到的项目逐项比较），
+  /// 仅在结果变化时 setState，避免每次按键都重建整页表单。
+  void _onFormChanged() {
+    final dirty = !_saved && _computeDirty();
+    if (dirty != _dirty && mounted) setState(() => _dirty = dirty);
+  }
+
+  bool _computeDirty() {
+    final p = widget.project;
+    return _nameController.text != p.name ||
+        _descriptionController.text != p.description ||
+        _rootDirController.text != p.rootDir ||
+        _workingDirController.text != p.workingDir ||
+        _execStartPreController.text != p.execStartPre ||
+        _execStartController.text != p.execStart ||
+        _execStartPostController.text != p.execStartPost ||
+        _execStopController.text != p.execStop ||
+        _execReloadController.text != p.execReload ||
+        _userController.text != p.user ||
+        _restartSecController.text != p.restartSec ||
+        _restartMaxController.text != '${p.restartMax}' ||
+        _timeoutStartController.text != '${p.timeoutStartSec}' ||
+        _timeoutStopController.text != '${p.timeoutStopSec}' ||
+        _memoryLimitController.text != _initialMemoryText ||
+        _cpuQuotaController.text != _initialCpuQuotaText ||
+        _standardOutputFileController.text !=
+            _initialOutputFile(p.standardOutput) ||
+        _standardErrorFileController.text !=
+            _initialOutputFile(p.standardError) ||
+        _restart != _optionOrFirst(kProjectRestartOptions, p.restart, 'on-failure') ||
+        _standardOutput != _initialOutputKind(p.standardOutput) ||
+        _standardError != _initialOutputKind(p.standardError) ||
+        _protectSystem != _optionOrFirst(kProtectSystemOptions, p.protectSystem, '') ||
+        _noNewPrivileges != p.noNewPrivileges ||
+        _protectTmp != p.protectTmp ||
+        _protectHome != p.protectHome ||
+        !listEquals(_environments, p.environments) ||
+        !listEquals(_requires, p.requires) ||
+        !listEquals(_wants, p.wants) ||
+        !listEquals(_after, p.after) ||
+        !listEquals(_before, p.before) ||
+        !listEquals(_readWritePaths, p.readWritePaths) ||
+        !listEquals(_readOnlyPaths, p.readOnlyPaths);
+  }
 
   /// 面板返回的 `standard_output` 形如 `journal` 或 `append:/var/log/app.log`，
   /// 这里拆成「类型」与「文件路径」两个输入。
@@ -400,53 +566,65 @@ class _EditFormState extends ConsumerState<_EditForm> {
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _descriptionController.dispose();
-    _rootDirController.dispose();
-    _workingDirController.dispose();
-    _execStartPreController.dispose();
-    _execStartController.dispose();
-    _execStartPostController.dispose();
-    _execStopController.dispose();
-    _execReloadController.dispose();
-    _userController.dispose();
-    _restartSecController.dispose();
-    _restartMaxController.dispose();
-    _timeoutStartController.dispose();
-    _timeoutStopController.dispose();
-    _memoryLimitController.dispose();
-    _cpuQuotaController.dispose();
-    _standardOutputFileController.dispose();
-    _standardErrorFileController.dispose();
+    for (final controller in _controllers) {
+      controller
+        ..removeListener(_onFormChanged)
+        ..dispose();
+    }
     super.dispose();
   }
 
+  // ---------------------------------------------------------------------
+  // 校验（错误就地展示在对应输入框下方，而不是一条 SnackBar）
+  // ---------------------------------------------------------------------
+
+  String? _validateRootDir(String? value) {
+    if ((value ?? '').trim().isEmpty) return '请填写项目目录';
+    return null;
+  }
+
+  /// 内存限制（MB）。原先非数字输入会被静默当作 0（= 取消限制），
+  /// 这里直接拒绝，避免用户以为限制生效。
+  String? _validateMemoryLimit(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    final mb = double.tryParse(text);
+    if (mb == null) return '请填写数字，0 表示不限制';
+    if (mb < 0) return '内存限制不能为负数';
+    return null;
+  }
+
+  String? _validateCpuQuota(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    if (!_kCpuQuotaPattern.hasMatch(text)) {
+      return '应为百分比，如 50%、200%';
+    }
+    return null;
+  }
+
+  /// 日志文件路径：选了「文件」输出就必须填绝对路径，
+  /// 原先留空会被静默改回 journal。
+  String? _validateOutputFile(String kind, String? value) {
+    if (!_isFileOutput(kind)) return null;
+    final path = (value ?? '').trim();
+    if (path.isEmpty) return '选择文件输出时必须填写文件路径';
+    if (!path.startsWith('/')) return '请填写绝对路径，如 /var/log/app.log';
+    return null;
+  }
+
   Future<void> _submit() async {
-    final name = _nameController.text.trim();
-    final rootDir = _rootDirController.text.trim();
-    if (name.isEmpty) {
-      showSnack(context, '请填写项目名称', error: true);
-      return;
-    }
-    if (!_kProjectNamePattern.hasMatch(name)) {
-      showSnack(context, '项目名称只能包含字母、数字、下划线与短横线', error: true);
-      return;
-    }
-    if (rootDir.isEmpty) {
-      showSnack(context, '请填写项目目录', error: true);
+    if (_submitting) return;
+    FocusScope.of(context).unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      showErrorSnack(context, _kFormInvalidHint);
       return;
     }
 
+    final name = _nameController.text.trim();
+    final rootDir = _rootDirController.text.trim();
     final memoryMb = double.tryParse(_memoryLimitController.text.trim()) ?? 0;
-    if (memoryMb < 0) {
-      showSnack(context, '内存限制不能为负数', error: true);
-      return;
-    }
     final cpuQuota = _cpuQuotaController.text.trim();
-    if (cpuQuota.isNotEmpty && !RegExp(r'^\d+(\.\d+)?%$').hasMatch(cpuQuota)) {
-      showSnack(context, 'CPU 限制格式应为百分比，如 50% 或 200%', error: true);
-      return;
-    }
 
     final payload = ProjectUpdatePayload(
       id: widget.project.id,
@@ -490,7 +668,10 @@ class _EditFormState extends ConsumerState<_EditForm> {
       await ref.read(projectRepoProvider).update(payload);
       ref.invalidate(projectDetailProvider(widget.project.id));
       if (!mounted) return;
-      showSnack(context, '保存成功，修改后需重启项目才会生效');
+      // 保存成功后不再拦截返回。
+      _saved = true;
+      _dirty = false;
+      showSuccessSnack(context, '已保存，重启项目后生效');
       context.pop(true);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -501,370 +682,461 @@ class _EditFormState extends ConsumerState<_EditForm> {
 
   @override
   Widget build(BuildContext context) {
+    // 有未保存修改时拦截系统返回手势与返回键（整页表单，误触代价高）。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '项目配置有未保存的修改，返回会丢失这些修改，确定放弃吗？',
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('编辑项目 · ${widget.project.name}')),
+      appBar: AppBar(
+        title: Text(
+          '编辑项目 · ${widget.project.name}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
       bottomNavigationBar: _SubmitBar(
         submitting: _submitting,
         label: '保存',
         onSubmit: _submit,
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 24),
-        children: [
-          SectionCard(
-            title: '基本信息',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _nameController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_-]')),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: '项目名称',
-                    helperText: '改名会同时重命名 systemd 服务文件',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
+          children: [
+            SectionCard(
+              title: '基本信息',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _nameController,
+                    enabled: !_submitting,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: _validateProjectName,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_-]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: '项目名称',
+                      helperText: '改名会同时重命名 systemd 服务文件',
+                      helperMaxLines: 2,
+                      errorMaxLines: 2,
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _descriptionController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: '项目描述',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _descriptionController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: '项目描述',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _rootDirController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '项目目录',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _rootDirController,
+                    enabled: !_submitting,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: _validateRootDir,
+                    decoration: const InputDecoration(
+                      labelText: '项目目录',
+                      errorMaxLines: 2,
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _workingDirController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '运行目录',
-                    hintText: '留空则与项目目录相同',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _userController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: '运行用户',
-                    hintText: '留空则以 root 运行',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '启动命令',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _CommandField(
-                  controller: _execStartPreController,
-                  label: '启动前命令 ExecStartPre',
-                ),
-                const SizedBox(height: 14),
-                _CommandField(
-                  controller: _execStartController,
-                  label: '启动命令 ExecStart',
-                ),
-                const SizedBox(height: 14),
-                _CommandField(
-                  controller: _execStartPostController,
-                  label: '启动后命令 ExecStartPost',
-                ),
-                const SizedBox(height: 14),
-                _CommandField(
-                  controller: _execStopController,
-                  label: '停止命令 ExecStop',
-                ),
-                const SizedBox(height: 14),
-                _CommandField(
-                  controller: _execReloadController,
-                  label: '重载命令 ExecReload',
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '重启策略',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _restart,
-                  decoration: const InputDecoration(
-                    labelText: '重启策略 Restart',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    for (final item in kProjectRestartOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _restart = value);
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _restartSecController,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '重启间隔 RestartSec',
-                    hintText: '如 5s、1min',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _IntField(
-                  controller: _restartMaxController,
-                  label: '最大重启次数 StartLimitBurst',
-                  helper: '0 表示不限制',
-                ),
-                const SizedBox(height: 14),
-                _IntField(
-                  controller: _timeoutStartController,
-                  label: '启动超时（秒）',
-                  helper: '0 表示使用 systemd 默认值',
-                ),
-                const SizedBox(height: 14),
-                _IntField(
-                  controller: _timeoutStopController,
-                  label: '停止超时（秒）',
-                  helper: '0 表示使用 systemd 默认值',
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            child: KvListField(
-              label: '环境变量',
-              initialValues: _environments,
-              helper: '写入 systemd 的 Environment=，值可包含空格',
-              keyHint: 'KEY',
-              valueHint: 'VALUE',
-              onChanged: (value) => _environments = value,
-            ),
-          ),
-          SectionCard(
-            title: '日志输出',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _standardOutput,
-                  decoration: const InputDecoration(
-                    labelText: '标准输出 StandardOutput',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    for (final item in kProjectOutputOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _standardOutput = value);
-                  },
-                ),
-                if (_isFileOutput(_standardOutput)) ...[
                   const SizedBox(height: 14),
                   TextField(
-                    controller: _standardOutputFileController,
+                    controller: _workingDirController,
                     autocorrect: false,
+                    enableSuggestions: false,
                     decoration: const InputDecoration(
-                      labelText: '标准输出文件路径',
-                      hintText: '/var/log/app.log',
+                      labelText: '运行目录',
+                      hintText: '留空则与项目目录相同',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _userController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: '运行用户',
+                      hintText: '留空则以 root 运行',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
                   ),
                 ],
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: _standardError,
-                  decoration: const InputDecoration(
-                    labelText: '标准错误 StandardError',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+              ),
+            ),
+            SectionCard(
+              title: '启动命令',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _CommandField(
+                    controller: _execStartPreController,
+                    label: '启动前命令 ExecStartPre',
                   ),
-                  items: [
-                    for (final item in kProjectOutputOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _standardError = value);
-                  },
-                ),
-                if (_isFileOutput(_standardError)) ...[
+                  const SizedBox(height: 14),
+                  _CommandField(
+                    controller: _execStartController,
+                    label: '启动命令 ExecStart',
+                  ),
+                  const SizedBox(height: 14),
+                  _CommandField(
+                    controller: _execStartPostController,
+                    label: '启动后命令 ExecStartPost',
+                  ),
+                  const SizedBox(height: 14),
+                  _CommandField(
+                    controller: _execStopController,
+                    label: '停止命令 ExecStop',
+                  ),
+                  const SizedBox(height: 14),
+                  _CommandField(
+                    controller: _execReloadController,
+                    label: '重载命令 ExecReload',
+                  ),
+                ],
+              ),
+            ),
+            SectionCard(
+              title: '重启策略',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: _restart,
+                    decoration: const InputDecoration(
+                      labelText: '重启策略 Restart',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProjectRestartOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _restart = value);
+                            _onFormChanged();
+                          },
+                  ),
                   const SizedBox(height: 14),
                   TextField(
-                    controller: _standardErrorFileController,
+                    controller: _restartSecController,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: '标准错误文件路径',
-                      hintText: '/var/log/app-error.log',
+                      labelText: '重启间隔 RestartSec',
+                      hintText: '如 5s、1min',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _IntField(
+                    controller: _restartMaxController,
+                    label: '最大重启次数 StartLimitBurst',
+                    helper: '0 表示不限制',
+                  ),
+                  const SizedBox(height: 14),
+                  _IntField(
+                    controller: _timeoutStartController,
+                    label: '启动超时（秒）',
+                    helper: '0 表示使用 systemd 默认值',
+                  ),
+                  const SizedBox(height: 14),
+                  _IntField(
+                    controller: _timeoutStopController,
+                    label: '停止超时（秒）',
+                    helper: '0 表示使用 systemd 默认值',
+                  ),
+                ],
+              ),
+            ),
+            SectionCard(
+              child: KvListField(
+                label: '环境变量',
+                initialValues: _environments,
+                helper: '写入 systemd 的 Environment=，值可包含空格',
+                keyHint: 'KEY',
+                valueHint: 'VALUE',
+                onChanged: (value) {
+                  _environments = value;
+                  _onFormChanged();
+                },
+              ),
+            ),
+            SectionCard(
+              title: '日志输出',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: _standardOutput,
+                    decoration: const InputDecoration(
+                      labelText: '标准输出 StandardOutput',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProjectOutputOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _standardOutput = value);
+                            _onFormChanged();
+                          },
+                  ),
+                  if (_isFileOutput(_standardOutput)) ...[
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _standardOutputFileController,
+                      enabled: !_submitting,
+                      autocorrect: false,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      validator: (value) =>
+                          _validateOutputFile(_standardOutput, value),
+                      decoration: const InputDecoration(
+                        labelText: '标准输出文件路径',
+                        hintText: '/var/log/app.log',
+                        errorMaxLines: 2,
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: _standardError,
+                    decoration: const InputDecoration(
+                      labelText: '标准错误 StandardError',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProjectOutputOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _standardError = value);
+                            _onFormChanged();
+                          },
+                  ),
+                  if (_isFileOutput(_standardError)) ...[
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _standardErrorFileController,
+                      enabled: !_submitting,
+                      autocorrect: false,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      validator: (value) =>
+                          _validateOutputFile(_standardError, value),
+                      decoration: const InputDecoration(
+                        labelText: '标准错误文件路径',
+                        hintText: '/var/log/app-error.log',
+                        errorMaxLines: 2,
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            SectionCard(
+              title: '依赖与启动顺序',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  StringListField(
+                    label: '强依赖 Requires',
+                    initialValues: _requires,
+                    hint: 'mysqld.service',
+                    onChanged: (value) {
+                      _requires = value;
+                      _onFormChanged();
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  StringListField(
+                    label: '弱依赖 Wants',
+                    initialValues: _wants,
+                    hint: 'redis.service',
+                    onChanged: (value) {
+                      _wants = value;
+                      _onFormChanged();
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  StringListField(
+                    label: '在其之后启动 After',
+                    initialValues: _after,
+                    hint: 'network.target',
+                    helper: '留空时面板默认写入 network.target',
+                    onChanged: (value) {
+                      _after = value;
+                      _onFormChanged();
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  StringListField(
+                    label: '在其之前启动 Before',
+                    initialValues: _before,
+                    hint: 'nginx.service',
+                    onChanged: (value) {
+                      _before = value;
+                      _onFormChanged();
+                    },
+                  ),
+                ],
+              ),
+            ),
+            SectionCard(
+              title: '资源限制',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _memoryLimitController,
+                    enabled: !_submitting,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: _validateMemoryLimit,
+                    decoration: const InputDecoration(
+                      labelText: '内存限制（MB）',
+                      helperText: '0 表示不限制',
+                      errorMaxLines: 2,
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _cpuQuotaController,
+                    enabled: !_submitting,
+                    autocorrect: false,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: _validateCpuQuota,
+                    decoration: const InputDecoration(
+                      labelText: 'CPU 限制 CPUQuota',
+                      hintText: '如 50%、200%',
+                      helperText: '100% = 1 个 CPU 核心，留空表示不限制',
+                      helperMaxLines: 2,
+                      errorMaxLines: 2,
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
-          ),
-          SectionCard(
-            title: '依赖与启动顺序',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                StringListField(
-                  label: '强依赖 Requires',
-                  initialValues: _requires,
-                  hint: 'mysqld.service',
-                  onChanged: (value) => _requires = value,
-                ),
-                const SizedBox(height: 6),
-                StringListField(
-                  label: '弱依赖 Wants',
-                  initialValues: _wants,
-                  hint: 'redis.service',
-                  onChanged: (value) => _wants = value,
-                ),
-                const SizedBox(height: 6),
-                StringListField(
-                  label: '在其之后启动 After',
-                  initialValues: _after,
-                  hint: 'network.target',
-                  helper: '留空时面板默认写入 network.target',
-                  onChanged: (value) => _after = value,
-                ),
-                const SizedBox(height: 6),
-                StringListField(
-                  label: '在其之前启动 Before',
-                  initialValues: _before,
-                  hint: 'nginx.service',
-                  onChanged: (value) => _before = value,
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '资源限制',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _memoryLimitController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: '内存限制（MB）',
-                    helperText: '0 表示不限制',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+            SectionCard(
+              title: '安全加固',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('禁止提权'),
+                    subtitle: const Text('NoNewPrivileges=true'),
+                    value: _noNewPrivileges,
+                    onChanged: (value) {
+                      setState(() => _noNewPrivileges = value);
+                      _onFormChanged();
+                    },
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _cpuQuotaController,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'CPU 限制 CPUQuota',
-                    hintText: '如 50%、200%',
-                    helperText: '100% = 1 个 CPU 核心，留空表示不限制',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('保护临时目录'),
+                    subtitle: const Text('ProtectTmp=true'),
+                    value: _protectTmp,
+                    onChanged: (value) {
+                      setState(() => _protectTmp = value);
+                      _onFormChanged();
+                    },
                   ),
-                ),
-              ],
-            ),
-          ),
-          SectionCard(
-            title: '安全加固',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('禁止提权'),
-                  subtitle: const Text('NoNewPrivileges=true'),
-                  value: _noNewPrivileges,
-                  onChanged: (value) =>
-                      setState(() => _noNewPrivileges = value),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('保护临时目录'),
-                  subtitle: const Text('ProtectTmp=true'),
-                  value: _protectTmp,
-                  onChanged: (value) => setState(() => _protectTmp = value),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('保护主目录'),
-                  subtitle: const Text('ProtectHome=true'),
-                  value: _protectHome,
-                  onChanged: (value) => setState(() => _protectHome = value),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  initialValue: _protectSystem,
-                  decoration: const InputDecoration(
-                    labelText: '保护系统 ProtectSystem',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('保护主目录'),
+                    subtitle: const Text('ProtectHome=true'),
+                    value: _protectHome,
+                    onChanged: (value) {
+                      setState(() => _protectHome = value);
+                      _onFormChanged();
+                    },
                   ),
-                  items: [
-                    for (final item in kProtectSystemOptions)
-                      DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _protectSystem = value);
-                  },
-                ),
-                const SizedBox(height: 8),
-                StringListField(
-                  label: '可读写路径 ReadWritePaths',
-                  initialValues: _readWritePaths,
-                  hint: '/www/app/storage',
-                  onChanged: (value) => _readWritePaths = value,
-                ),
-                const SizedBox(height: 6),
-                StringListField(
-                  label: '只读路径 ReadOnlyPaths',
-                  initialValues: _readOnlyPaths,
-                  hint: '/etc',
-                  onChanged: (value) => _readOnlyPaths = value,
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: _protectSystem,
+                    decoration: const InputDecoration(
+                      labelText: '保护系统 ProtectSystem',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final item in kProtectSystemOptions)
+                        DropdownMenuItem(value: item.$1, child: Text(item.$2)),
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _protectSystem = value);
+                            _onFormChanged();
+                          },
+                  ),
+                  const SizedBox(height: 8),
+                  StringListField(
+                    label: '可读写路径 ReadWritePaths',
+                    initialValues: _readWritePaths,
+                    hint: '/www/app/storage',
+                    onChanged: (value) {
+                      _readWritePaths = value;
+                      _onFormChanged();
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  StringListField(
+                    label: '只读路径 ReadOnlyPaths',
+                    initialValues: _readOnlyPaths,
+                    hint: '/etc',
+                    onChanged: (value) {
+                      _readOnlyPaths = value;
+                      _onFormChanged();
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

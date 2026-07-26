@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/panel_models.dart';
 import '../providers/home_providers.dart';
@@ -29,10 +30,10 @@ class _TopProcessesCardState extends ConsumerState<TopProcessesCard> {
     switch (_type) {
       case 'memory':
         // 服务端 value 为进程 RSS 字节数（pkg/tools/tools.go CollectTopProcesses）。
-        return formatBytes(process.value, decimals: 1);
+        return formatBytes(process.value, fractionDigits: 1);
       case 'disk_io':
-        return '读 ${formatBytes(process.read, decimals: 1)} / '
-            '写 ${formatBytes(process.write, decimals: 1)}';
+        return '读 ${formatBytes(process.read, fractionDigits: 1)} / '
+            '写 ${formatBytes(process.write, fractionDigits: 1)}';
       case 'cpu':
       default:
         return formatPercent(process.value);
@@ -46,10 +47,10 @@ class _TopProcessesCardState extends ConsumerState<TopProcessesCard> {
 
     return SectionCard(
       title: '进程占用 Top 5',
-      trailing: IconButton(
+      trailing: A11yIconButton(
         visualDensity: VisualDensity.compact,
         icon: const Icon(Icons.refresh, size: 18),
-        tooltip: '刷新',
+        tooltip: '刷新进程占用列表',
         onPressed: () => ref.invalidate(topProcessesProvider(_type)),
       ),
       child: Column(
@@ -89,7 +90,7 @@ class _TopProcessesCardState extends ConsumerState<TopProcessesCard> {
               ),
             ),
             error: (error, _) => InlineError(
-              message: error is ApiException ? error.message : '$error',
+              message: describeError(error),
               onRetry: () => ref.invalidate(topProcessesProvider(_type)),
             ),
             data: (processes) {
@@ -132,10 +133,16 @@ class _TopProcessesCardState extends ConsumerState<TopProcessesCard> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            _formatValue(process),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
+                          // 「磁盘 IO」档位的文案是「读 X / 写 Y」，比另外两档
+                          // 长得多，定宽 Text 在窄屏上会把左侧进程名挤到溢出。
+                          Flexible(
+                            child: Text(
+                              _formatValue(process),
+                              textAlign: TextAlign.end,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                fontFeatures: kTabularFigures,
+                              ),
                             ),
                           ),
                         ],

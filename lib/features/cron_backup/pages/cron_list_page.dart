@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -35,8 +36,8 @@ class _CronListPageState extends ConsumerState<CronListPage> {
       appBar: AppBar(
         title: const Text('计划任务'),
         actions: [
-          IconButton(
-            tooltip: '备份管理',
+          A11yIconButton(
+            tooltip: '打开备份管理',
             icon: const Icon(Icons.backup_outlined),
             onPressed: () => context.push('/backups'),
           ),
@@ -85,13 +86,8 @@ class _CronListPageState extends ConsumerState<CronListPage> {
     );
   }
 
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(cronListProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  /// 加载下一页；失败由 [PagedList] 在列表底部展示并重试，不再弹 SnackBar。
+  Future<void> _loadMore() => ref.read(cronListProvider.notifier).loadMore();
 
   Future<void> _create() async {
     final saved = await context.push<bool>('/crons/edit');
@@ -109,7 +105,7 @@ class _CronListPageState extends ConsumerState<CronListPage> {
 
   void _viewLog(Cron cron) {
     if (cron.log.isEmpty) {
-      showSnack(context, '该任务没有日志文件');
+      showInfoSnack(context, '该任务没有日志文件');
       return;
     }
     context.push(
@@ -120,11 +116,22 @@ class _CronListPageState extends ConsumerState<CronListPage> {
     );
   }
 
-  void _run(Cron cron) {
+  /// 立即执行：会在服务器上真正跑一遍脚本，先二次确认再进执行页
+  /// （执行页打开即自动连上 WebSocket 开跑，误触无法撤销）。
+  Future<void> _run(Cron cron) async {
     if (cron.shell.isEmpty) {
-      showSnack(context, '该任务没有可执行脚本');
+      showInfoSnack(context, '该任务没有可执行脚本');
       return;
     }
+    final ok = await showConfirmDialog(
+      context,
+      title: '立即执行',
+      content: '将在服务器上立即运行「${cron.name}」的任务脚本，输出会实时显示。'
+          '任务本身的执行周期不受影响。',
+      confirmText: '立即执行',
+    );
+    if (!ok || !mounted) return;
+    if (!context.mounted) return;
     context.push(
       Uri(
         path: '/crons/run',
@@ -137,7 +144,7 @@ class _CronListPageState extends ConsumerState<CronListPage> {
     setState(() => _toggling.add(cron.id));
     try {
       await ref.read(cronListProvider.notifier).setStatus(cron, value);
-      if (mounted) showSnack(context, value ? '任务已启用' : '任务已停用');
+      if (mounted) showSuccessSnack(context, value ? '任务已启用' : '任务已停用');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -153,10 +160,10 @@ class _CronListPageState extends ConsumerState<CronListPage> {
       confirmText: '删除',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ref.read(cronListProvider.notifier).delete(cron.id);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, '已删除');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }

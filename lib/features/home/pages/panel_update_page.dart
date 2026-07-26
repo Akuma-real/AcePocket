@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/ws_client.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -306,8 +307,9 @@ class _PanelUpdatePageState extends ConsumerState<PanelUpdatePage> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('面板升级'),
-          leading: IconButton(
+          leading: A11yIconButton(
             icon: const Icon(Icons.arrow_back),
+            tooltip: '返回上一页',
             onPressed: () async {
               if (await _confirmLeave()) {
                 if (context.mounted) context.pop();
@@ -316,8 +318,8 @@ class _PanelUpdatePageState extends ConsumerState<PanelUpdatePage> {
           ),
           actions: [
             if (!_started)
-              IconButton(
-                tooltip: '刷新',
+              A11yIconButton(
+                tooltip: '重新检查面板版本',
                 icon: const Icon(Icons.refresh),
                 onPressed: () {
                   ref.invalidate(panelUpdateInfoProvider);
@@ -409,9 +411,8 @@ class _PanelUpdatePageState extends ConsumerState<PanelUpdatePage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: FilledButton.icon(
-                  onPressed: versions.isEmpty
-                      ? null
-                      : () => _startUpgrade(latest),
+                  onPressed:
+                      versions.isEmpty ? null : () => _startUpgrade(latest),
                   icon: const Icon(Icons.system_update_alt_rounded),
                   label: Text(
                     versions.isEmpty ? '暂无可用升级' : '升级到 $latest',
@@ -529,7 +530,8 @@ class _PanelUpdatePageState extends ConsumerState<PanelUpdatePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.lock_outline, size: 20, color: theme.colorScheme.error),
+              Icon(Icons.lock_outline,
+                  size: 20, color: theme.colorScheme.error),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(

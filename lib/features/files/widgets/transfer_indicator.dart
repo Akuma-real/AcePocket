@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 
-/// 把字节数格式化为可读大小（与面板 `tools.FormatBytes` 的观感一致）。
+import '../../../core/utils/format.dart';
+
+/// 把字节数格式化为可读大小。
+///
+/// 体积换算统一走 core 的 [formatBytes]（1024 进制、两位小数、边界安全），
+/// 这里只保留传输场景特有的语义：总量未知时约定传 -1，展示为「未知」。
 String formatTransferBytes(int bytes) {
   if (bytes < 0) return '未知';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  var value = bytes.toDouble();
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  final text = unit == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
-  return '$text ${units[unit]}';
+  return formatBytes(bytes);
 }
 
 /// 把速度（字节/秒）格式化为可读文本。
@@ -60,6 +57,8 @@ class TransferIndicator extends StatelessWidget {
         if (subtitle != null) ...[
           Text(
             subtitle!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -86,15 +85,24 @@ class TransferIndicator extends StatelessWidget {
                     ? '${formatTransferBytes(transferred)} / '
                         '${formatTransferBytes(total)}'
                     : formatTransferBytes(transferred),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-            Text(
-              [percent, speed].where((e) => e.isNotEmpty).join(' · '),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 8),
+            // 百分比 + 速度在窄屏 / 大字号下会顶破 Row，必须可收缩。
+            Flexible(
+              child: Text(
+                [percent, speed].where((e) => e.isNotEmpty).join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],

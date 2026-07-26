@@ -69,13 +69,9 @@ class _BackupStoragePageState extends ConsumerState<BackupStoragePage> {
     );
   }
 
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(backupStorageListProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  /// 加载下一页；失败由 [PagedList] 在列表底部展示并重试，不再弹 SnackBar。
+  Future<void> _loadMore() =>
+      ref.read(backupStorageListProvider.notifier).loadMore();
 
   Future<void> _create() async {
     final saved = await context.push<bool>('/backups/storages/edit');
@@ -87,7 +83,7 @@ class _BackupStoragePageState extends ConsumerState<BackupStoragePage> {
 
   Future<void> _edit(BackupStorage storage) async {
     if (storage.isLocal) {
-      showSnack(context, '本地存储由面板设置维护，不可在此编辑');
+      showInfoSnack(context, '本地存储由面板设置维护，不可在此编辑');
       return;
     }
     final saved =
@@ -108,11 +104,11 @@ class _BackupStoragePageState extends ConsumerState<BackupStoragePage> {
       confirmText: '删除',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ref.read(backupStorageListProvider.notifier).delete(storage.id);
       ref.invalidate(storageOptionsProvider);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, '已删除');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }

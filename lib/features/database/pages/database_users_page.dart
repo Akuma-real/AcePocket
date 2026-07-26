@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
 import '../../../core/widgets/confirm_dialog.dart';
@@ -117,13 +118,24 @@ class _DatabaseUsersPageState extends ConsumerState<DatabaseUsersPage> {
               onLoadMore: () => _notifier.loadMore(),
               onRetry: () => ref.invalidate(databaseUserListProvider(_type)),
               emptyMessage: _type.isEmpty
-                  ? '暂无数据库用户\n可创建新用户，或在服务器上执行「同步用户」'
-                  : '暂无 ${dbTypeLabel(_type)} 用户',
+                  ? '还没有数据库用户\n可新建用户，或在「数据库服务器」里对已有服务器执行「同步用户」'
+                  : '暂无 ${dbTypeLabel(_type)} 用户\n可在右上角切换筛选查看其他类型',
               emptyIcon: Icons.people_outline,
-              emptyAction: FilledButton.icon(
-                onPressed: _create,
-                icon: const Icon(Icons.person_add_alt),
-                label: const Text('创建用户'),
+              emptyAction: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _create,
+                    icon: const Icon(Icons.person_add_alt),
+                    label: const Text('创建用户'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () => context.push('/databases/servers'),
+                    icon: const Icon(Icons.dns_outlined),
+                    label: const Text('去同步已有用户'),
+                  ),
+                ],
               ),
               itemBuilder: (context, user, index) => DatabaseUserTile(
                 user: user,

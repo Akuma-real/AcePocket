@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'snack.dart';
+
 /// 查看证书 / 私钥内容（PEM），支持一键复制。
 Future<void> showCertContentDialog(
   BuildContext context, {
@@ -81,9 +83,7 @@ class _CertContentDialogState extends State<_CertContentDialog> {
               : () async {
                   await Clipboard.setData(ClipboardData(text: _current));
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(_tab == 0 ? '证书已复制' : '私钥已复制')),
-                  );
+                  showSnack(context, _tab == 0 ? '证书已复制' : '私钥已复制');
                 },
           icon: const Icon(Icons.copy_all_outlined, size: 18),
           label: const Text('复制'),

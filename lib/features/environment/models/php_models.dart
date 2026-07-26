@@ -197,23 +197,33 @@ class PhpConfigTune {
 }
 
 /// 带单位的容量值（如 `50M`）拆解结果。
+///
+/// [unit] 为空串表示「不带单位」——php.ini 中即按字节计（`memory_limit=268435456`），
+/// 也是 `-1`（不限制）的写法。**不带单位的值必须原样回写**：早期实现对无法匹配
+/// `\d+[KMG]` 的值一律补 `M`，会把 `memory_limit = -1` 静默改成 `-1M`、
+/// 把字节数改成同样数值的兆字节，属于配置损坏。
 class PhpSizeValue {
   const PhpSizeValue(this.number, this.unit);
 
-  /// 从 `50M` / `256` 解析；无法解析时数值为空串、单位取 `M`。
+  /// 从 `50M` / `256` / `-1` 解析。
+  ///
+  /// 空值取单位 `M`（新填写时最常用）；带 K/M/G 后缀的拆成数值 + 单位；
+  /// 其余（纯数字、负数、无法识别的写法）保持无单位，原样保留。
   factory PhpSizeValue.parse(String raw) {
     final value = raw.trim();
     if (value.isEmpty) return const PhpSizeValue('', 'M');
-    final match = RegExp(r'^(\d+)\s*([KMG])$', caseSensitive: false)
-        .firstMatch(value);
+    final match =
+        RegExp(r'^(-?\d+)\s*([KMG])$', caseSensitive: false).firstMatch(value);
     if (match != null) {
       return PhpSizeValue(match.group(1)!, match.group(2)!.toUpperCase());
     }
-    // 纯数字（php.ini 中表示字节）或 -1（不限制）
-    return PhpSizeValue(value, 'M');
+    // 纯数字（php.ini 中表示字节）、-1（不限制）或无法识别的写法：不加单位。
+    return PhpSizeValue(value, '');
   }
 
   final String number;
+
+  /// `K` / `M` / `G`，或空串表示不带单位。
   final String unit;
 
   /// 组合回 php.ini 写法；数值为空时返回空串（面板会注释掉该项）。

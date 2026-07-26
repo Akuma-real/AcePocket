@@ -47,4 +47,7 @@ class ContainerImage {
 
   /// 是否正被容器使用。
   bool get inUse => containers > 0;
+
+  /// Docker 未统计引用数（返回 -1）：既不能说「使用中」也不能说「未使用」。
+  bool get usageUnknown => containers < 0;
 }

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -12,7 +14,6 @@ import '../models/project.dart';
 import '../providers/project_providers.dart';
 import '../widgets/list_footer.dart';
 import '../widgets/project_tile.dart';
-import '../widgets/snack.dart';
 
 /// 项目列表页 `/projects`。
 ///
@@ -52,13 +53,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
     }
   }
 
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(projectListProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  /// 加载下一页；失败会记录到 `state.loadMoreError`，由列表底部展示并可重试。
+  Future<void> _loadMore() =>
+      ref.read(projectListProvider.notifier).loadMore();
 
   Future<void> _refresh() => ref.read(projectListProvider.notifier).refresh();
 
@@ -100,15 +97,26 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
       } else {
         await repo.start(project.name);
       }
-      if (mounted) showSnack(context, project.isRunning ? '已停止' : '已启动');
+      if (mounted) {
+        showSuccessSnack(context, project.isRunning ? '已停止' : '已启动');
+      }
       await _reloadQuietly();
     });
   }
 
   Future<void> _restart(ProjectDetail project) async {
+    // 重启会中断正在处理的请求，与「停止」同样需要二次确认。
+    final ok = await showConfirmDialog(
+      context,
+      title: '重启 ${project.name}',
+      content: '重启期间该项目会短暂不可用，确定重启吗？',
+      confirmText: '重启',
+      danger: true,
+    );
+    if (!ok) return;
     await _runBusy(project.id, () async {
       await ref.read(projectRepoProvider).restart(project.name);
-      if (mounted) showSnack(context, '已重启');
+      if (mounted) showSuccessSnack(context, '已重启');
       await _reloadQuietly();
     });
   }
@@ -116,7 +124,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
   Future<void> _reload(ProjectDetail project) async {
     await _runBusy(project.id, () async {
       await ref.read(projectRepoProvider).reload(project.name);
-      if (mounted) showSnack(context, '已重载');
+      if (mounted) showSuccessSnack(context, '已重载配置');
       await _reloadQuietly();
     });
   }
@@ -134,7 +142,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
             (item) => item.copyWith(enabled: !project.enabled),
           );
       if (mounted) {
-        showSnack(context, project.enabled ? '已关闭开机自启' : '已开启开机自启');
+        showSuccessSnack(context, project.enabled ? '已关闭开机自启' : '已开启开机自启');
       }
     });
   }
@@ -151,7 +159,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
     if (!ok) return;
     await _runBusy(project.id, () async {
       await ref.read(projectRepoProvider).delete(project.id);
-      if (mounted) showSnack(context, '已删除');
+      if (mounted) showSuccessSnack(context, '已删除项目「${project.name}」');
       await _reloadQuietly();
     });
   }
@@ -180,8 +188,8 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
       appBar: AppBar(
         title: const Text('项目'),
         actions: [
-          IconButton(
-            tooltip: '应用模板',
+          A11yIconButton(
+            tooltip: '打开应用模板市场',
             onPressed: () => context.push('/templates'),
             icon: const Icon(Icons.widgets_outlined),
           ),
@@ -245,6 +253,8 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage> {
                           hasMore: state.hasMore,
                           total: state.total,
                           unit: '个项目',
+                          error: state.loadMoreError,
+                          onRetry: _loadMore,
                         );
                       }
                       final project = state.items[index];

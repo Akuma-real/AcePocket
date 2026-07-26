@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// DNS 验证别名映射输入（原域名 → 别名记录）。
 ///
 /// 对应面板 `request.CertCreate.Alias`（`map[string]string`）：
@@ -115,9 +117,12 @@ class _AliasListFieldState extends State<AliasListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
+                // 纯装饰的方向箭头，语义上由「原域名 → 别名」两个输入框自述。
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: Icon(Icons.arrow_forward, size: 18),
+                  child: ExcludeSemantics(
+                    child: Icon(Icons.arrow_forward, size: 18),
+                  ),
                 ),
                 Expanded(
                   child: TextFormField(
@@ -131,8 +136,8 @@ class _AliasListFieldState extends State<AliasListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 条别名映射',
                   onPressed: () {
                     setState(() {
                       final entry = _entries.removeAt(i);

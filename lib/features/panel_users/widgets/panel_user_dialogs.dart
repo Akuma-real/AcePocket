@@ -1,32 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
 
-/// 把异常转成可直接展示的文案（[ApiException] 取面板返回的 msg）。
-String errorMessage(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 统一的顶层提示（成功 / 失败）。
-void showSnack(BuildContext context, String message, {bool error = false}) {
-  final theme = Theme.of(context);
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(
-        message,
-        style: TextStyle(
-          color: error ? theme.colorScheme.onErrorContainer : null,
-        ),
-      ),
-      backgroundColor: error ? theme.colorScheme.errorContainer : null,
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: error ? 4 : 2),
-    ),
-  );
-}
+// 提示统一走 core 的 `widgets/app_snack.dart`
+// （`showSuccessSnack` / `showErrorSnack` / `showInfoSnack`），
+// 错误文案由 core 的 `describeError` 提取，本模块不再自建 SnackBar 与文案函数：
+// 旧实现只改了 backgroundColor 而没改前景色，浅色主题下近白字浮在浅粉底上不可读。
 
 // ------------------------------------------------------------------ 表单校验
 
@@ -195,7 +174,12 @@ class _PasswordDialogState extends State<_PasswordDialog> {
   final TextEditingController _password = TextEditingController();
   final TextEditingController _confirm = TextEditingController();
   bool _obscure = true;
-  String? _error;
+
+  /// 密码本身不合规（长度不足等），展示在「新密码」输入框下。
+  String? _passwordError;
+
+  /// 两次输入不一致，展示在「确认密码」输入框下。
+  String? _confirmError;
 
   @override
   void dispose() {
@@ -204,15 +188,26 @@ class _PasswordDialogState extends State<_PasswordDialog> {
     super.dispose();
   }
 
+  void _clearErrors() {
+    if (_passwordError == null && _confirmError == null) return;
+    setState(() {
+      _passwordError = null;
+      _confirmError = null;
+    });
+  }
+
   void _submit() {
     final password = _password.text;
-    final error = validatePassword(password);
-    if (error != null) {
-      setState(() => _error = error);
-      return;
-    }
-    if (password != _confirm.text) {
-      setState(() => _error = '两次输入的密码不一致');
+    // 错误要落在出问题的那个输入框上：旧实现把「密码至少 8 位」显示在
+    // 「确认密码」下方，用户会以为是确认框填错了。
+    final passwordError = validatePassword(password);
+    final confirmError =
+        passwordError == null && password != _confirm.text ? '两次输入的密码不一致' : null;
+    if (passwordError != null || confirmError != null) {
+      setState(() {
+        _passwordError = passwordError;
+        _confirmError = confirmError;
+      });
       return;
     }
     Navigator.of(context).pop(password);
@@ -222,45 +217,47 @@ class _PasswordDialogState extends State<_PasswordDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _password,
-            autofocus: true,
-            obscureText: _obscure,
-            decoration: InputDecoration(
-              labelText: '新密码',
-              helperText: widget.helperText,
-              helperMaxLines: 3,
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscure ? Icons.visibility_off : Icons.visibility,
+      // 小屏 + 弹出键盘 + 多行错误提示时内容会超出可用高度，必须可滚动。
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _password,
+              autofocus: true,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: '新密码',
+                helperText: widget.helperText,
+                helperMaxLines: 3,
+                errorText: _passwordError,
+                errorMaxLines: 3,
+                border: const OutlineInputBorder(),
+                suffixIcon: A11yIconButton(
+                  tooltip: _obscure ? '显示密码' : '隐藏密码',
+                  icon: Icon(
+                    _obscure ? Icons.visibility_off : Icons.visibility,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                onPressed: () => setState(() => _obscure = !_obscure),
               ),
+              onChanged: (_) => _clearErrors(),
             ),
-            onChanged: (_) {
-              if (_error != null) setState(() => _error = null);
-            },
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _confirm,
-            obscureText: _obscure,
-            decoration: InputDecoration(
-              labelText: '确认密码',
-              errorText: _error,
-              errorMaxLines: 3,
-              border: const OutlineInputBorder(),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _confirm,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: '确认密码',
+                errorText: _confirmError,
+                errorMaxLines: 3,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => _clearErrors(),
+              onSubmitted: (_) => _submit(),
             ),
-            onChanged: (_) {
-              if (_error != null) setState(() => _error = null);
-            },
-            onSubmitted: (_) => _submit(),
-          ),
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -387,7 +384,8 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                 errorText: _passwordError,
                 errorMaxLines: 2,
                 border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
+                suffixIcon: A11yIconButton(
+                  tooltip: _obscure ? '显示密码' : '隐藏密码',
                   icon: Icon(
                     _obscure ? Icons.visibility_off : Icons.visibility,
                   ),

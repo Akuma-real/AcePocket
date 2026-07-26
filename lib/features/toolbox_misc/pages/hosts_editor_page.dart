@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../providers/toolbox_misc_providers.dart';
-import '../widgets/toolbox_dialogs.dart';
 import '../widgets/toolbox_tiles.dart';
 
 /// /etc/hosts 编辑页（GET/POST `/toolbox_system/hosts`）。
@@ -76,10 +76,10 @@ class _HostsEditorPageState extends ConsumerState<HostsEditorPage> {
       if (!mounted) return;
       setState(() => _original = content);
       ref.invalidate(systemToolsProvider);
-      showSnack(context, 'hosts 已保存');
+      showSuccessSnack(context, 'hosts 已保存');
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

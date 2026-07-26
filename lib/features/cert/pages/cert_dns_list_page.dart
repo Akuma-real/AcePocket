@@ -162,10 +162,16 @@ class _CertDnsListPageState extends ConsumerState<CertDnsListPage> {
                       color: Theme.of(context).colorScheme.onPrimaryContainer,
                     ),
                   ),
-                  title: Text(dns.name),
+                  title: Text(
+                    dns.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     '$provider · 验证服务器 ${dns.data.dnsServer}'
                     '${dns.data.skipVerify ? ' · 跳过验证' : ''}',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: _busyId == dns.id
                       ? const SizedBox(
@@ -174,6 +180,7 @@ class _CertDnsListPageState extends ConsumerState<CertDnsListPage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : PopupMenuButton<String>(
+                          tooltip: '「${dns.name}」的更多操作',
                           onSelected: (value) {
                             if (value == 'edit') {
                               _openForm(id: dns.id);

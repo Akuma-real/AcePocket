@@ -14,6 +14,7 @@ class DatabaseServerTile extends StatelessWidget {
     required this.onEditRemark,
     required this.onSync,
     required this.onDelete,
+    this.syncing = false,
   });
 
   final DatabaseServer server;
@@ -21,6 +22,9 @@ class DatabaseServerTile extends StatelessWidget {
   final VoidCallback onEditRemark;
   final VoidCallback onSync;
   final VoidCallback onDelete;
+
+  /// 该服务器正在同步用户：菜单项改为进行中文案，避免重复触发。
+  final bool syncing;
 
   @override
   Widget build(BuildContext context) {
@@ -126,13 +130,14 @@ class DatabaseServerTile extends StatelessWidget {
                 ),
               ),
               if (canSync)
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'sync',
+                  enabled: !syncing,
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.sync),
-                    title: Text('同步用户'),
+                    leading: const Icon(Icons.sync),
+                    title: Text(syncing ? '正在同步用户…' : '同步用户'),
                   ),
                 ),
               PopupMenuItem(

@@ -105,4 +105,33 @@ class NotifySetting {
         events: events ?? this.events,
         channels: channels ?? this.channels,
       );
+
+  /// 值相等（列表逐元素比较）。
+  ///
+  /// 事件通知页用它判断草稿与服务端当前值是否一致：勾了又取消、改回原样时
+  /// 不应再被当成「未保存的修改」拦截返回。
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NotifySetting &&
+          _sameItems<String>(events, other.events) &&
+          _sameItems<int>(channels, other.channels);
+
+  @override
+  int get hashCode => Object.hash(
+        Object.hashAllUnordered(events),
+        Object.hashAllUnordered(channels),
+      );
+
+  /// 忽略顺序比较：勾选顺序不同但内容相同的两份设置等价
+  /// （面板侧 events / channels 都按集合语义处理）。
+  static bool _sameItems<T>(List<T> a, List<T> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    final rest = List<T>.from(b);
+    for (final item in a) {
+      if (!rest.remove(item)) return false;
+    }
+    return true;
+  }
 }

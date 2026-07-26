@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/app_snack.dart';
+
 /// 日志时间戳 `HH:mm:ss`（记录时刻本就是本地时区）。
 String _stamp(DateTime time) {
   final local = time.toLocal();
@@ -64,9 +66,7 @@ class _UpgradeLogViewState extends State<UpgradeLogView> {
         widget.logs.map((e) => '${_stamp(e.time)} ${e.message}').join('\n');
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('日志已复制')));
+    showSuccessSnack(context, '升级日志已复制到剪贴板');
   }
 
   @override
@@ -111,8 +111,7 @@ class _UpgradeLogViewState extends State<UpgradeLogView> {
             controller: _controller,
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             itemCount: widget.logs.length,
-            itemBuilder: (context, index) =>
-                _LogRow(entry: widget.logs[index]),
+            itemBuilder: (context, index) => _LogRow(entry: widget.logs[index]),
           ),
         ),
       ],
@@ -130,7 +129,10 @@ class _LogRow extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final (IconData icon, Color color) = switch (entry.level) {
-      UpgradeLogLevel.info => (Icons.info_outline, colorScheme.onSurfaceVariant),
+      UpgradeLogLevel.info => (
+          Icons.info_outline,
+          colorScheme.onSurfaceVariant
+        ),
       UpgradeLogLevel.progress => (
           Icons.radio_button_checked,
           colorScheme.primary

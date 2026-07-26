@@ -33,9 +33,15 @@ class InfoChip extends StatelessWidget {
             Icon(icon, size: 13, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(color: fg),
+          // 标签内容可能很长（服务器名、用户名、索引名），必须可收缩并省略，
+          // 否则在 Wrap 里会撑破卡片宽度报 overflow。
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(color: fg),
+            ),
           ),
         ],
       ),

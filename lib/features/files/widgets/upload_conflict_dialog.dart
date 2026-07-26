@@ -21,8 +21,14 @@ Future<UploadConflictAction?> showUploadConflictDialog(
     context: context,
     builder: (context) {
       final theme = Theme.of(context);
-      final preview = names.take(8).join('\n');
+      const previewLimit = 8;
+      final preview = names.take(previewLimit).toList();
+      final hintStyle = theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      );
       return AlertDialog(
+        // 冲突文件多 / 文件名长时内容会超出屏幕高度，交给对话框自身滚动。
+        scrollable: true,
         title: const Text('目标已存在'),
         content: SizedBox(
           width: 480,
@@ -33,18 +39,21 @@ Future<UploadConflictAction?> showUploadConflictDialog(
               Text('以下 ${names.length} 个文件在目标目录已存在：',
                   style: theme.textTheme.bodyMedium),
               const SizedBox(height: 8),
-              Text(
-                names.length > 8 ? '$preview\n… 等 ${names.length} 个' : preview,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              // 逐行渲染而非拼接成一个字符串：长文件名可以单独省略，
+              // 不会把对话框撑出横向溢出。
+              for (final name in preview)
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: hintStyle,
                 ),
-              ),
+              if (names.length > previewLimit)
+                Text('… 等共 ${names.length} 个', style: hintStyle),
               const SizedBox(height: 12),
               Text(
                 '请选择处理方式，该选择对本次上传的全部冲突文件生效。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                style: hintStyle,
               ),
             ],
           ),

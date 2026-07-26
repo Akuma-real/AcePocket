@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -24,8 +25,8 @@ class RaidPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('RAID 阵列'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新 RAID 状态',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(raidInfoProvider),
           ),
@@ -126,14 +127,20 @@ class RaidPage extends ConsumerWidget {
               Expanded(
                 child: Text(
                   array.name.isEmpty ? '未命名阵列' : array.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              TagChip(
-                label: array.state.isEmpty ? '状态未知' : array.state,
-                color: stateColor,
+              const SizedBox(width: 8),
+              // 阵列状态是 mdadm / storcli 的原始文本，可能很长。
+              Flexible(
+                child: TagChip(
+                  label: array.state.isEmpty ? '状态未知' : array.state,
+                  color: stateColor,
+                ),
               ),
             ],
           ),
@@ -205,9 +212,11 @@ class RaidPage extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    TagChip(
-                      label: device.state.isEmpty ? '未知' : device.state,
-                      color: _healthColor(theme, raidHealthOf(device.state)),
+                    Flexible(
+                      child: TagChip(
+                        label: device.state.isEmpty ? '未知' : device.state,
+                        color: _healthColor(theme, raidHealthOf(device.state)),
+                      ),
                     ),
                   ],
                 ),

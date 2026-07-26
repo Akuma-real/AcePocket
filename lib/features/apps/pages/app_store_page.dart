@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -67,10 +69,10 @@ class _AppStorePageState extends ConsumerState<AppStorePage>
       if (!mounted) return;
       ref.invalidate(appCategoriesProvider);
       refreshAllAppLists(ref);
-      _toast('应用缓存已更新');
+      showSuccessSnack(context, '应用缓存已更新');
     } catch (e) {
       if (!mounted) return;
-      _toast('更新缓存失败：$e', error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _updatingCache = false);
     }
@@ -80,18 +82,7 @@ class _AppStorePageState extends ConsumerState<AppStorePage>
     final saved = await showAppOrderSheet(context);
     if (!mounted || !saved) return;
     refreshAllAppLists(ref);
-    _toast('排序已保存');
-  }
-
-  void _toast(String message, {bool error = false}) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-      ),
-    );
+    showSuccessSnack(context, '首页显示排序已保存');
   }
 
   @override
@@ -104,8 +95,8 @@ class _AppStorePageState extends ConsumerState<AppStorePage>
       appBar: AppBar(
         title: const Text('应用商店'),
         actions: [
-          IconButton(
-            tooltip: '更新应用缓存',
+          A11yIconButton(
+            tooltip: _updatingCache ? '正在更新应用缓存' : '更新应用商店缓存',
             onPressed: _updatingCache ? null : _updateCache,
             icon: _updatingCache
                 ? const SizedBox(
@@ -116,6 +107,7 @@ class _AppStorePageState extends ConsumerState<AppStorePage>
                 : const Icon(Icons.cloud_sync_outlined),
           ),
           PopupMenuButton<String>(
+            tooltip: '更多操作',
             onSelected: (value) {
               if (value == 'order') _openOrderSheet();
             },
@@ -148,7 +140,8 @@ class _AppStorePageState extends ConsumerState<AppStorePage>
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: filter.keyword.isEmpty
                     ? null
-                    : IconButton(
+                    : A11yIconButton(
+                        tooltip: '清除搜索关键词',
                         icon: const Icon(Icons.close),
                         onPressed: () {
                           _searchController.clear();
@@ -240,23 +233,14 @@ class _AppListViewState extends ConsumerState<_AppListView>
   final Set<String> _busySlugs = <String>{};
   bool _loadingMore = false;
 
+  /// 最近一次「加载更多」的失败原因，用于在列表底部展示重试入口。
+  Object? _loadMoreError;
+
   @override
   bool get wantKeepAlive => true;
 
   AppListNotifier get _notifier =>
       ref.read(appListProvider(widget.installedOnly).notifier);
-
-  void _toast(String message, {bool error = false}) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-      ),
-    );
-  }
 
   Future<void> _run(
     String slug,
@@ -273,11 +257,11 @@ class _AppListViewState extends ConsumerState<_AppListView>
       if (task) {
         showTaskSubmittedSnack(context, successMessage);
       } else {
-        _toast(successMessage);
+        showSuccessSnack(context, successMessage);
       }
       if (refreshLists) refreshAllAppLists(ref);
     } catch (e) {
-      _toast('操作失败：$e', error: true);
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busySlugs.remove(slug));
     }
@@ -291,7 +275,7 @@ class _AppListViewState extends ConsumerState<_AppListView>
       context,
       title: '安装 ${app.name}',
       content: '确定安装 ${app.name}（$version）吗？\n'
-          '安装任务将在面板后台执行，可在面板的后台任务中查看进度。',
+          '安装任务将在面板后台执行，可在任务中心查看进度。',
       confirmText: '安装',
     );
     if (!ok || !mounted) return;
@@ -311,7 +295,8 @@ class _AppListViewState extends ConsumerState<_AppListView>
       context,
       title: '更新 ${app.name}',
       content: '确定将 ${app.name} 更新到 ${target.isEmpty ? '最新版本' : target} 吗？\n'
-          '更新可能会将相关配置重置为默认状态。',
+          '更新可能会将相关配置重置为默认状态。\n'
+          '更新任务将在面板后台执行，可在任务中心查看进度。',
       confirmText: '更新',
       danger: true,
     );
@@ -332,8 +317,10 @@ class _AppListViewState extends ConsumerState<_AppListView>
       context,
       title: '卸载 ${app.name}',
       content: isWebServer
-          ? '${app.name} 是 Web 服务器，重装或切换到其他 Web 服务器会重置所有网站的配置，确定卸载吗？'
-          : '确定卸载 ${app.name} 吗？该操作不可恢复，应用数据可能一并删除。',
+          ? '${app.name} 是 Web 服务器，重装或切换到其他 Web 服务器会重置所有网站的配置，确定卸载吗？\n'
+              '卸载任务将在面板后台执行，可在任务中心查看进度。'
+          : '确定卸载 ${app.name} 吗？该操作不可恢复，应用数据可能一并删除。\n'
+              '卸载任务将在面板后台执行，可在任务中心查看进度。',
       confirmText: '卸载',
       danger: true,
     );
@@ -367,21 +354,34 @@ class _AppListViewState extends ConsumerState<_AppListView>
 
   Future<void> _custom(AppItem app) async {
     final saved = await showAppCustomDialog(context, app: app);
-    if (saved) _toast('编译参数已保存');
+    if (saved && mounted) showSuccessSnack(context, '编译参数已保存');
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore) return;
     _loadingMore = true;
+    if (_loadMoreError != null) setState(() => _loadMoreError = null);
     final error = await _notifier.loadMore();
     _loadingMore = false;
-    if (error != null) _toast('加载更多失败：$error', error: true);
+    if (!mounted) return;
+    setState(() => _loadMoreError = error);
+    if (error != null) showErrorSnack(context, error);
+  }
+
+  /// 下拉刷新：失败只提示，不清空已加载的列表（见 [AppListNotifier.refresh]）。
+  Future<void> _refresh() async {
+    final error = await _notifier.refresh();
+    if (!mounted) return;
+    if (_loadMoreError != null) setState(() => _loadMoreError = null);
+    if (error != null) showErrorSnack(context, error);
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final state = ref.watch(appListProvider(widget.installedOnly));
+    final filter = ref.watch(appFilterProvider);
+    final filtered = filter.keyword.isNotEmpty || filter.category.isNotEmpty;
     final categories = ref.watch(appCategoriesProvider).valueOrNull ??
         const <AppCategory>[];
     final categoryLabels = {
@@ -394,18 +394,19 @@ class _AppListViewState extends ConsumerState<_AppListView>
     if (state.error != null && state.items.isEmpty) {
       return ErrorView(
         error: state.error!,
-        onRetry: () => _notifier.refresh(),
+        onRetry: () => _notifier.reload(),
       );
     }
 
-
     return RefreshIndicator(
-      onRefresh: () => _notifier.refresh(),
+      onRefresh: _refresh,
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification.metrics.axis != Axis.vertical) return false;
           if (state.hasMore &&
               !state.isLoadingMore &&
+              // 失败后不再自动重试，避免离线时反复打请求；由底部按钮手动触发。
+              _loadMoreError == null &&
               notification.metrics.pixels >=
                   notification.metrics.maxScrollExtent - 320) {
             _loadMore();
@@ -419,9 +420,13 @@ class _AppListViewState extends ConsumerState<_AppListView>
                   SizedBox(
                     height: MediaQuery.of(context).size.height * 0.5,
                     child: EmptyView(
-                      message: widget.installedOnly
-                          ? '还没有已安装的应用\n可在「全部应用」中安装'
-                          : '没有匹配的应用\n可尝试更换分类或关键词',
+                      // 有筛选条件时不能说「还没有安装应用」——用户可能只是
+                      // 关键词没匹配上，提示要指向可操作的下一步。
+                      message: filtered
+                          ? '没有匹配的应用\n可尝试更换分类或关键词'
+                          : (widget.installedOnly
+                              ? '还没有已安装的应用\n可在「全部应用」中安装'
+                              : '应用列表为空\n可点击右上角更新应用商店缓存'),
                       icon: Icons.apps_outlined,
                     ),
                   ),
@@ -437,6 +442,8 @@ class _AppListViewState extends ConsumerState<_AppListView>
                       hasMore: state.hasMore,
                       total: state.total,
                       emptyLabel: '共 %d 个应用',
+                      error: _loadMoreError,
+                      onRetry: _loadMore,
                     );
                   }
                   final app = state.items[index];

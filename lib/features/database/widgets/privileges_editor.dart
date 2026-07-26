@@ -61,8 +61,17 @@ class _PrivilegesEditorState extends State<PrivilegesEditor> {
             children: [
               for (final name in widget.values)
                 InputChip(
-                  label: Text(name),
+                  // 数据库名可能很长且不含空格（无法自动折行），限宽并省略。
+                  label: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 200),
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   onDeleted: () => _remove(name),
+                  deleteButtonTooltipMessage: '移除授权数据库 $name',
                   deleteIcon: const Icon(Icons.close, size: 16),
                 ),
             ],
@@ -82,8 +91,10 @@ class _PrivilegesEditorState extends State<PrivilegesEditor> {
             ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
-              tooltip: '添加',
+              // 读屏只念 tooltip，写清楚动作对象而不是单字「添加」。
+              tooltip: '添加授权数据库',
               onPressed: _add,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: const Icon(Icons.add),
             ),
           ],

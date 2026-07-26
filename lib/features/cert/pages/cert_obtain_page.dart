@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/api/ws_client.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/section_card.dart';
 import '../providers/cert_providers.dart';
@@ -295,13 +296,12 @@ class _CertObtainPageState extends ConsumerState<CertObtainPage> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(_title),
-          leading: IconButton(
+          // 走 maybePop 触发上面的 PopScope，和系统返回手势共用同一套确认流程，
+          // 避免「箭头有确认、手势没确认」（或反过来）的不一致。
+          leading: A11yIconButton(
+            tooltip: '返回证书列表',
             icon: const Icon(Icons.arrow_back),
-            onPressed: () async {
-              if (await _confirmLeave()) {
-                if (context.mounted) context.pop(_changed);
-              }
-            },
+            onPressed: () => Navigator.maybePop(context),
           ),
         ),
         body: Column(
@@ -499,11 +499,24 @@ class _LogRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final (IconData icon, Color color) = switch (entry.level) {
-      _LogLevel.info => (Icons.info_outline, colorScheme.onSurfaceVariant),
-      _LogLevel.progress => (Icons.radio_button_checked, colorScheme.primary),
-      _LogLevel.success => (Icons.check_circle_outline, colorScheme.primary),
-      _LogLevel.error => (Icons.error_outline, colorScheme.error),
+    // 级别只靠图标与颜色区分，读屏与色觉障碍用户会漏掉，补一个语义标签。
+    final (IconData icon, Color color, String levelLabel) = switch (entry.level) {
+      _LogLevel.info => (
+          Icons.info_outline,
+          colorScheme.onSurfaceVariant,
+          '提示',
+        ),
+      _LogLevel.progress => (
+          Icons.radio_button_checked,
+          colorScheme.primary,
+          '进行中',
+        ),
+      _LogLevel.success => (
+          Icons.check_circle_outline,
+          colorScheme.primary,
+          '成功',
+        ),
+      _LogLevel.error => (Icons.error_outline, colorScheme.error, '失败'),
     };
     final time = entry.time;
     final stamp = '${time.hour.toString().padLeft(2, '0')}:'
@@ -515,7 +528,7 @@ class _LogRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: color),
+          Icon(icon, size: 16, color: color, semanticLabel: levelLabel),
           const SizedBox(width: 8),
           Text(
             stamp,

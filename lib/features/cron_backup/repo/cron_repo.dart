@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_exception.dart';
 import '../models/cron.dart';
 import '../models/log_tail.dart';
 import '../models/page_result.dart';
@@ -24,7 +25,7 @@ class CronRepo {
   Future<Cron> get(int id) async {
     final data = await _api.get('/cron/$id');
     if (data is Map<String, dynamic>) return Cron.fromJson(data);
-    throw StateError('计划任务详情响应格式异常');
+    throw const ApiException('计划任务详情响应格式异常');
   }
 
   /// 创建计划任务。
@@ -121,15 +122,25 @@ class CronRepo {
   // ---------------- 脚本与日志（复用文件接口） ----------------
 
   /// 读取脚本文件内容（`/api/file/content` 返回 base64 编码的内容）。
+  ///
+  /// 读取失败必须抛异常，**不能吞掉返回空串**：编辑页拿到空串会以为脚本本来
+  /// 就是空的，保存时用默认模板覆盖服务器上的真实脚本（不可恢复的数据丢失）。
+  /// 只有面板确实返回空内容（文件本身为空）才返回 `''`。
   Future<String> readFile(String path) async {
     final data = await _api.get('/file/content', query: {'path': path});
-    if (data is! Map<String, dynamic>) return '';
+    if (data is! Map<String, dynamic>) {
+      throw const ApiException('读取脚本内容失败：响应格式异常');
+    }
     final content = data['content'];
-    if (content is! String || content.isEmpty) return '';
+    if (content == null) return '';
+    if (content is! String) {
+      throw const ApiException('读取脚本内容失败：响应格式异常');
+    }
+    if (content.isEmpty) return '';
     try {
       return utf8.decode(base64.decode(content), allowMalformed: true);
     } catch (_) {
-      return '';
+      throw const ApiException('读取脚本内容失败：内容无法解码');
     }
   }
 

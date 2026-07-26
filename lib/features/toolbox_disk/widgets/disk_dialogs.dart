@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/utils/format.dart';
 import '../models/disk_models.dart';
 import '../models/lvm_models.dart';
 import '../utils/disk_validation.dart';
@@ -61,39 +62,43 @@ class _TypedConfirmDialogState extends State<_TypedConfirmDialog> {
     final theme = Theme.of(context);
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.message, style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          Text(
-            '请输入 ${widget.requiredText} 以确认：',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+      // 提示文案（系统盘警告等）较长，小屏 + 大字号下必须能滚动，否则
+      // AlertDialog 的内容区会直接溢出，输入框被挤出屏幕无法完成确认。
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.message, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 16),
+            Text(
+              '请输入 ${widget.requiredText} 以确认：',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            style: const TextStyle(fontFamily: 'monospace'),
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              isDense: true,
-              hintText: widget.requiredText,
-              suffixIcon: _matched
-                  ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
-                  : null,
+            const SizedBox(height: 8),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              style: const TextStyle(fontFamily: 'monospace'),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                isDense: true,
+                hintText: widget.requiredText,
+                suffixIcon: _matched
+                    ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
+                    : null,
+              ),
+              onChanged: (value) {
+                final matched = value.trim() == widget.requiredText;
+                if (matched != _matched) setState(() => _matched = matched);
+              },
             ),
-            onChanged: (value) {
-              final matched = value.trim() == widget.requiredText;
-              if (matched != _matched) setState(() => _matched = matched);
-            },
-          ),
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -305,55 +310,58 @@ class _FsTypeDialogState extends State<_FsTypeDialog> {
     final theme = Theme.of(context);
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.target,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
+      // 警告文案在系统盘场景下明显更长，内容区必须可滚动。
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.target,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'monospace',
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.warning_amber_rounded,
-                    size: 18, color: theme.colorScheme.onErrorContainer),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.warning,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 18, color: theme.colorScheme.onErrorContainer),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.warning,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
                     ),
                   ),
-                ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('文件系统', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final type in kFsTypes)
+                  ChoiceChip(
+                    label: Text(type),
+                    selected: _fsType == type,
+                    onSelected: (_) => setState(() => _fsType = type),
+                  ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Text('文件系统', style: theme.textTheme.labelLarge),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final type in kFsTypes)
-                ChoiceChip(
-                  label: Text(type),
-                  selected: _fsType == type,
-                  onSelected: (_) => setState(() => _fsType = type),
-                ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(

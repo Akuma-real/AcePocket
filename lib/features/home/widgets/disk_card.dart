@@ -116,12 +116,17 @@ class _IoBlock extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w600,
+            // 速率每 3 秒变一次，等宽数字避免数值宽度变化带来的抖动。
+            fontFeatures: kTabularFigures,
           ),
         ),
         Text(
           '累计 ${formatBytes(total)}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
+            fontFeatures: kTabularFigures,
           ),
         ),
         const SizedBox(height: 6),

@@ -1,4 +1,5 @@
 import '../../../core/api/api_client.dart';
+import '../../../core/providers/paged_notifier_base.dart';
 import '../models/alert_rule.dart';
 import '../models/notify_channel.dart';
 import '../models/notify_setting.dart';
@@ -18,13 +19,13 @@ class NotifyAlertRepository {
   // ---------------------------------------------------------------- 告警规则
 
   /// 告警规则列表（GET /alert/rule）。
-  Future<PageResult<AlertRule>> alertRules({
+  Future<PagedResult<AlertRule>> alertRules({
     required int page,
     required int limit,
   }) async {
     final data =
         await _api.get('/alert/rule', query: {'page': page, 'limit': limit});
-    return PageResult.parse(data, AlertRule.fromJson);
+    return parsePagedResult(data, AlertRule.fromJson);
   }
 
   /// 获取单条告警规则（GET /alert/rule/{id}）。
@@ -50,13 +51,13 @@ class NotifyAlertRepository {
   // ---------------------------------------------------------------- 告警记录
 
   /// 告警记录列表（GET /alert/record）。
-  Future<PageResult<AlertRecord>> alertRecords({
+  Future<PagedResult<AlertRecord>> alertRecords({
     required int page,
     required int limit,
   }) async {
     final data =
         await _api.get('/alert/record', query: {'page': page, 'limit': limit});
-    return PageResult.parse(data, AlertRecord.fromJson);
+    return parsePagedResult(data, AlertRecord.fromJson);
   }
 
   /// 清空告警记录（POST /alert/record/clear）。
@@ -65,13 +66,13 @@ class NotifyAlertRepository {
   // ---------------------------------------------------------------- 通知渠道
 
   /// 通知渠道列表（GET /notify/channel）。
-  Future<PageResult<NotifyChannel>> notifyChannels({
+  Future<PagedResult<NotifyChannel>> notifyChannels({
     required int page,
     required int limit,
   }) async {
     final data = await _api
         .get('/notify/channel', query: {'page': page, 'limit': limit});
-    return PageResult.parse(data, NotifyChannel.fromJson);
+    return parsePagedResult(data, NotifyChannel.fromJson);
   }
 
   /// 全部通知渠道（GET /notify/channel/all），供多选使用。
@@ -126,13 +127,13 @@ class NotifyAlertRepository {
   // ------------------------------------------------------------------ WebHook
 
   /// WebHook 列表（GET /webhook）。
-  Future<PageResult<WebHook>> webhooks({
+  Future<PagedResult<WebHook>> webhooks({
     required int page,
     required int limit,
   }) async {
     final data =
         await _api.get('/webhook', query: {'page': page, 'limit': limit});
-    return PageResult.parse(data, WebHook.fromJson);
+    return parsePagedResult(data, WebHook.fromJson);
   }
 
   /// 获取单个 WebHook（GET /webhook/{id}）。

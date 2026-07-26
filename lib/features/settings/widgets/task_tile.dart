@@ -153,7 +153,7 @@ class TaskTile extends StatelessWidget {
                 ),
               ),
               PopupMenuButton<String>(
-                tooltip: '更多操作',
+                tooltip: '该任务的更多操作',
                 onSelected: (value) {
                   if (value == 'cancel') onCancel();
                   if (value == 'delete') onDelete();

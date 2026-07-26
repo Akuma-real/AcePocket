@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -26,10 +27,25 @@ class _PhpInfoPageState extends ConsumerState<PhpInfoPage> {
   String _query = '';
   bool _raw = false;
 
+  /// 解析结果缓存。
+  ///
+  /// phpinfo 的 HTML 有几十上百 KB，[parsePhpInfo] 要跑多条 dotAll 正则；
+  /// 原来放在 build 里，搜索框每敲一个字符就整篇重解析一次，输入明显卡顿。
+  String? _parsedHtml;
+  List<PhpInfoBlock> _parsedBlocks = const [];
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  List<PhpInfoBlock> _blocksOf(String html) {
+    if (_parsedHtml != html) {
+      _parsedHtml = html;
+      _parsedBlocks = parsePhpInfo(html);
+    }
+    return _parsedBlocks;
   }
 
   @override
@@ -38,15 +54,15 @@ class _PhpInfoPageState extends ConsumerState<PhpInfoPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('phpinfo · PHP ${widget.version}'),
+        title: Text('phpinfo · PHP ${phpVersionText(widget.version)}'),
         actions: [
-          IconButton(
-            tooltip: _raw ? '格式化展示' : '查看原始输出',
+          A11yIconButton(
+            tooltip: _raw ? '切换到格式化展示' : '查看原始 HTML 输出',
             icon: Icon(_raw ? Icons.view_list_outlined : Icons.code_rounded),
             onPressed: () => setState(() => _raw = !_raw),
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '重新执行 phpinfo',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(phpInfoProvider(widget.version)),
           ),
@@ -73,15 +89,18 @@ class _PhpInfoPageState extends ConsumerState<PhpInfoPage> {
               Expanded(
                 child: Text(
                   '原始 HTML 输出（${html.length} 字符）',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                 ),
               ),
               TextButton.icon(
-                onPressed: () => copyToClipboard(context, html),
+                onPressed:
+                    html.isEmpty ? null : () => copyToClipboard(context, html),
                 icon: const Icon(Icons.copy_rounded, size: 16),
-                label: const Text('复制'),
+                label: const Text('复制全文'),
               ),
             ],
           ),
@@ -100,7 +119,7 @@ class _PhpInfoPageState extends ConsumerState<PhpInfoPage> {
   }
 
   Widget _parsedView(String html) {
-    final blocks = parsePhpInfo(html);
+    final blocks = _blocksOf(html);
     final lowered = _query.trim().toLowerCase();
     final visible = lowered.isEmpty
         ? blocks
@@ -123,7 +142,8 @@ class _PhpInfoPageState extends ConsumerState<PhpInfoPage> {
               prefixIcon: const Icon(Icons.search, size: 20),
               suffixIcon: _query.isEmpty
                   ? null
-                  : IconButton(
+                  : A11yIconButton(
+                      tooltip: '清空搜索关键字',
                       icon: const Icon(Icons.close, size: 18),
                       onPressed: () {
                         _searchController.clear();

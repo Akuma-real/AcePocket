@@ -3,36 +3,27 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../core/api/api_exception.dart';
-
-/// 把异常转成可直接展示的文案（[ApiException] 取面板返回的 msg）。
-String errorMessage(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 统一的顶层提示（成功 / 失败）。
-void showSnack(BuildContext context, String message, {bool error = false}) {
-  final theme = Theme.of(context);
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(
-        message,
-        style: TextStyle(
-          color: error ? theme.colorScheme.onErrorContainer : null,
-        ),
-      ),
-      backgroundColor: error ? theme.colorScheme.errorContainer : null,
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: error ? 4 : 2),
-    ),
-  );
-}
+import '../../../core/widgets/a11y.dart';
 
 /// 校验是否为合法 IP（IPv4 / IPv6），面板对 DNS 有 `ip` 校验。
 bool isIpAddress(String value) => InternetAddress.tryParse(value) != null;
+
+/// 校验 NTP / 主机地址：域名或 IP，不含空白与协议前缀。
+///
+/// 面板把该值直接写进 chrony / timesyncd 配置文件，带空格或 `http://`
+/// 会让服务启动失败，且错误只体现在服务端日志里，因此在客户端先拦一道。
+String? validateHostAddress(String value, {String label = '服务器地址'}) {
+  if (value.isEmpty) return '请填写$label';
+  if (RegExp(r'\s').hasMatch(value)) return '$label不能包含空格';
+  if (value.contains('://')) return '$label不需要填写协议前缀';
+  if (value.contains('/')) return '$label不能包含路径';
+  if (isIpAddress(value)) return null;
+  final ok = RegExp(
+    r'^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+    r'(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$',
+  ).hasMatch(value);
+  return ok ? null : '$label格式不合法';
+}
 
 // ------------------------------------------------------------------ 文本输入
 
@@ -124,6 +115,10 @@ class _TextInputDialogState extends State<_TextInputDialog> {
         inputFormatters: widget.inputFormatters,
         textInputAction: TextInputAction.done,
         onSubmitted: (_) => _submit(),
+        // 用户开始修正后立刻撤下上一次的报错，避免旧提示一直挂在输入框下。
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
         decoration: InputDecoration(
           labelText: widget.label,
           hintText: widget.hintText,
@@ -145,6 +140,9 @@ class _TextInputDialogState extends State<_TextInputDialog> {
 }
 
 /// 整数输入对话框。
+///
+/// [extraValidator] 在区间校验通过后追加业务校验（返回非 null 即报错），
+/// 例如 SWAP 大小不允许填 1 MB。
 Future<int?> showIntInputDialog(
   BuildContext context, {
   required String title,
@@ -154,6 +152,7 @@ Future<int?> showIntInputDialog(
   String? label,
   String? helperText,
   String confirmText = '保存',
+  String? Function(int value)? extraValidator,
 }) async {
   final text = await showTextInputDialog(
     context,
@@ -168,7 +167,7 @@ Future<int?> showIntInputDialog(
       final parsed = int.tryParse(value);
       if (parsed == null) return '请输入数字';
       if (parsed < min || parsed > max) return '请输入 $min ~ $max 之间的数字';
-      return null;
+      return extraValidator?.call(parsed);
     },
   );
   if (text == null) return null;
@@ -215,24 +214,61 @@ class _SearchableSelectDialog extends StatefulWidget {
 }
 
 class _SearchableSelectDialogState extends State<_SearchableSelectDialog> {
+  /// 每个选项的固定行高，用于打开时精确滚动到当前值。
+  static const double _itemExtent = 44;
+
   final TextEditingController _search = TextEditingController();
+  final ScrollController _scroll = ScrollController();
   late List<String> _filtered = widget.options;
+  String _keyword = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // 时区列表有数百项，打开时直接停在当前时区上，省去手动翻找。
+    final index = widget.options.indexOf(widget.value);
+    if (index > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scroll.hasClients) return;
+        final target = (index * _itemExtent - _itemExtent * 2)
+            .clamp(0.0, _scroll.position.maxScrollExtent)
+            .toDouble();
+        _scroll.jumpTo(target);
+      });
+    }
+  }
 
   @override
   void dispose() {
     _search.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
+  /// 把 `Asia/Shanghai` 归一化为 `asia shanghai`，
+  /// 使「asia shang」「shanghai」「Asia/Shang」都能命中。
+  static String _normalize(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[/_\-]'), ' ');
+
   void _onSearch(String keyword) {
-    final k = keyword.trim().toLowerCase();
+    final tokens = _normalize(keyword)
+        .split(' ')
+        .where((t) => t.isNotEmpty)
+        .toList(growable: false);
     setState(() {
-      _filtered = k.isEmpty
+      _keyword = keyword;
+      _filtered = tokens.isEmpty
           ? widget.options
-          : widget.options
-              .where((o) => o.toLowerCase().contains(k))
-              .toList();
+          : widget.options.where((option) {
+              final normalized = _normalize(option);
+              return tokens.every(normalized.contains);
+            }).toList();
     });
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    _onSearch('');
   }
 
   @override
@@ -251,33 +287,67 @@ class _SearchableSelectDialogState extends State<_SearchableSelectDialog> {
               child: TextField(
                 controller: _search,
                 onChanged: _onSearch,
+                textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   isDense: true,
                   prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _keyword.isEmpty
+                      ? null
+                      : A11yIconButton(
+                          icon: const Icon(Icons.clear, size: 20),
+                          tooltip: '清空搜索关键词',
+                          onPressed: _clearSearch,
+                        ),
                   hintText: widget.searchHint,
                   border: const OutlineInputBorder(),
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _filtered.length == widget.options.length
+                      ? '共 ${widget.options.length} 项，当前为 ${widget.value}'
+                      : '匹配到 ${_filtered.length} / ${widget.options.length} 项',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
             Expanded(
               child: _filtered.isEmpty
                   ? Center(
-                      child: Text(
-                        '没有匹配项',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Text(
+                          '没有匹配「$_keyword」的选项，换个关键词试试',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     )
                   : ListView.builder(
+                      controller: _scroll,
+                      itemExtent: _itemExtent,
                       itemCount: _filtered.length,
                       itemBuilder: (context, index) {
                         final option = _filtered[index];
                         final selected = option == widget.value;
                         return ListTile(
                           dense: true,
-                          title: Text(option),
+                          selected: selected,
+                          title: Text(
+                            option,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           trailing: selected
                               ? Icon(Icons.check,
                                   color: theme.colorScheme.primary)
@@ -349,15 +419,20 @@ class _DnsEditDialogState extends State<_DnsEditDialog> {
 
   String? _validate(String value) {
     if (value.isEmpty) return '请填写 DNS 服务器地址';
-    if (!isIpAddress(value)) return '请输入合法的 IP 地址';
+    if (!isIpAddress(value)) return '请输入合法的 IPv4 / IPv6 地址';
     return null;
   }
 
   void _submit() {
     final v1 = _c1.text.trim();
     final v2 = _c2.text.trim();
-    final e1 = _validate(v1);
-    final e2 = _validate(v2);
+    var e1 = _validate(v1);
+    var e2 = _validate(v2);
+    // 面板会把两个地址原样写进配置：填成同一个等于没有备用 DNS，
+    // 主 DNS 故障时解析会整体失败，这里直接拦下。
+    if (e1 == null && e2 == null && v1 == v2) {
+      e2 = '备用 DNS 不能与首选 DNS 相同';
+    }
     if (e1 != null || e2 != null) {
       setState(() {
         _e1 = e1;
@@ -368,37 +443,68 @@ class _DnsEditDialogState extends State<_DnsEditDialog> {
     Navigator.of(context).pop(DnsEditResult(v1, v2));
   }
 
+  void _clearError(bool first) {
+    if (first ? _e1 == null : _e2 == null) return;
+    setState(() {
+      if (first) {
+        _e1 = null;
+      } else {
+        _e2 = null;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AlertDialog(
       title: const Text('设置 DNS'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _c1,
-            autofocus: true,
-            keyboardType: TextInputType.text,
-            decoration: InputDecoration(
-              labelText: '首选 DNS',
-              hintText: '例如 223.5.5.5',
-              errorText: _e1,
-              border: const OutlineInputBorder(),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '两项都必须填写，且必须是合法的 IPv4 或 IPv6 地址。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _c2,
-            keyboardType: TextInputType.text,
-            decoration: InputDecoration(
-              labelText: '备用 DNS',
-              hintText: '例如 8.8.8.8',
-              errorText: _e2,
-              border: const OutlineInputBorder(),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _c1,
+              autofocus: true,
+              keyboardType: TextInputType.text,
+              autocorrect: false,
+              textInputAction: TextInputAction.next,
+              onChanged: (_) => _clearError(true),
+              decoration: InputDecoration(
+                labelText: '首选 DNS',
+                hintText: 'IPv4 或 IPv6 地址',
+                errorText: _e1,
+                errorMaxLines: 2,
+                border: const OutlineInputBorder(),
+              ),
             ),
-            onSubmitted: (_) => _submit(),
-          ),
-        ],
+            const SizedBox(height: 12),
+            TextField(
+              controller: _c2,
+              keyboardType: TextInputType.text,
+              autocorrect: false,
+              textInputAction: TextInputAction.done,
+              onChanged: (_) => _clearError(false),
+              decoration: InputDecoration(
+                labelText: '备用 DNS',
+                hintText: 'IPv4 或 IPv6 地址',
+                errorText: _e2,
+                errorMaxLines: 2,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -508,7 +614,21 @@ class _StringListDialogState extends State<_StringListDialog> {
       setState(() => _error = '${widget.itemLabel}不能重复');
       return;
     }
+    // 逐项做格式校验：非法地址会让面板重启 NTP 服务时失败，
+    // 且报错只出现在服务端日志里，用户看到的只是一句「操作失败」。
+    for (var i = 0; i < values.length; i++) {
+      final message = validateHostAddress(values[i], label: widget.itemLabel);
+      if (message != null) {
+        setState(() => _error = '第 ${i + 1} 个$message');
+        return;
+      }
+    }
     Navigator.of(context).pop(values);
+  }
+
+  void _clearError() {
+    if (_error == null) return;
+    setState(() => _error = null);
   }
 
   @override
@@ -540,15 +660,19 @@ class _StringListDialogState extends State<_StringListDialog> {
                       Expanded(
                         child: TextField(
                           controller: _controllers[i],
+                          autocorrect: false,
+                          keyboardType: TextInputType.url,
+                          onChanged: (_) => _clearError(),
                           decoration: InputDecoration(
                             isDense: true,
                             labelText: '${widget.itemLabel} ${i + 1}',
+                            hintText: '域名或 IP 地址',
                             border: const OutlineInputBorder(),
                           ),
                         ),
                       ),
-                      IconButton(
-                        tooltip: '删除',
+                      A11yIconButton(
+                        tooltip: '删除第 ${i + 1} 个${widget.itemLabel}',
                         icon: const Icon(Icons.remove_circle_outline),
                         onPressed: () => _removeAt(i),
                       ),
@@ -621,6 +745,7 @@ class _SyncTimeDialogState extends State<_SyncTimeDialog> {
   String _selected = '';
   final TextEditingController _custom = TextEditingController();
   bool _useCustom = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -630,7 +755,15 @@ class _SyncTimeDialogState extends State<_SyncTimeDialog> {
 
   void _submit() {
     if (_useCustom) {
-      Navigator.of(context).pop(_custom.text.trim());
+      final value = _custom.text.trim();
+      // 自定义留空会被当成空串提交，等同于「自动选择」，
+      // 用户以为用了自己填的服务器，实际没有——这里明确拦下。
+      final message = validateHostAddress(value, label: 'NTP 服务器地址');
+      if (message != null) {
+        setState(() => _error = message);
+        return;
+      }
+      Navigator.of(context).pop(value);
       return;
     }
     Navigator.of(context).pop(_selected);
@@ -662,6 +795,7 @@ class _SyncTimeDialogState extends State<_SyncTimeDialog> {
                   setState(() {
                     _useCustom = value == '__custom__';
                     if (!_useCustom) _selected = value;
+                    _error = null;
                   });
                 },
                 child: Column(
@@ -678,7 +812,11 @@ class _SyncTimeDialogState extends State<_SyncTimeDialog> {
                         value: server,
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(server),
+                        title: Text(
+                          server,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     const RadioListTile<String>(
                       value: '__custom__',
@@ -695,11 +833,20 @@ class _SyncTimeDialogState extends State<_SyncTimeDialog> {
                   child: TextField(
                     controller: _custom,
                     autofocus: true,
-                    decoration: const InputDecoration(
+                    autocorrect: false,
+                    keyboardType: TextInputType.url,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _submit(),
+                    onChanged: (_) {
+                      if (_error != null) setState(() => _error = null);
+                    },
+                    decoration: InputDecoration(
                       isDense: true,
                       labelText: 'NTP 服务器地址',
-                      hintText: '例如 ntp.aliyun.com',
-                      border: OutlineInputBorder(),
+                      hintText: '域名或 IP，如 ntp.example.com',
+                      errorText: _error,
+                      errorMaxLines: 2,
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/cron.dart';
 import 'format.dart';
 
@@ -87,9 +88,13 @@ class CronTile extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Switch(
-                    value: cron.status,
-                    onChanged: busy ? null : onToggle,
+                  a11ySwitch(
+                    // 只说明控制对象，开 / 关状态由 Switch 自己播报。
+                    label: '计划任务 ${cron.name} 的启用状态',
+                    child: Switch(
+                      value: cron.status,
+                      onChanged: busy ? null : onToggle,
+                    ),
                   ),
                 ],
               ),
@@ -105,6 +110,7 @@ class CronTile extends StatelessWidget {
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -136,23 +142,25 @@ class CronTile extends StatelessWidget {
                   Expanded(
                     child: Text(
                       '更新于 ${formatDateTimeShort(cron.updatedAt)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.outline,
                       ),
                     ),
                   ),
-                  IconButton(
-                    tooltip: '立即执行',
+                  A11yIconButton(
+                    tooltip: '立即执行此任务',
                     icon: const Icon(Icons.play_arrow),
                     onPressed: onRun,
                   ),
-                  IconButton(
-                    tooltip: '查看日志',
+                  A11yIconButton(
+                    tooltip: '查看任务日志',
                     icon: const Icon(Icons.article_outlined),
                     onPressed: onLog,
                   ),
                   PopupMenuButton<String>(
-                    tooltip: '更多',
+                    tooltip: '更多任务操作',
                     onSelected: (value) {
                       switch (value) {
                         case 'edit':
@@ -225,6 +233,8 @@ class _Tag extends StatelessWidget {
       ),
       child: Text(
         text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelSmall?.copyWith(
           color: textColor ?? theme.colorScheme.onSurface,
         ),

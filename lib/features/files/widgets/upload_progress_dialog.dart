@@ -157,7 +157,8 @@ class _UploadProgressDialogState extends State<_UploadProgressDialog> {
         _finishedBytes += job.source.size;
         _currentSent = 0;
       } catch (e) {
-        _failures.add('${job.targetName}：$e');
+        // describeError：直接插值会把原始英文异常类型带到用户面前。
+        _failures.add('${job.targetName}：${describeError(e)}');
         _finishedBytes += job.source.size;
         _currentSent = 0;
       } finally {

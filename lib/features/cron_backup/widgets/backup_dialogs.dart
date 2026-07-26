@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/backup_file.dart';
 import '../providers/options_providers.dart';
 import '../providers/storage_providers.dart';
@@ -92,7 +93,7 @@ class _CreateBackupDialogState extends ConsumerState<_CreateBackupDialog> {
             if (form != null && !form.validate()) return;
             final target = _target;
             if (target == null || target.isEmpty) {
-              showSnack(context, '请选择备份目标');
+              showErrorSnack(context, '请选择备份目标');
               return;
             }
             Navigator.of(context).pop(
@@ -198,7 +199,7 @@ class _RestoreDialogState extends ConsumerState<_RestoreDialog> {
             if (form != null && !form.validate()) return;
             final target = _target;
             if (target == null || target.isEmpty) {
-              showSnack(context, '请选择恢复目标');
+              showErrorSnack(context, '请选择恢复目标');
               return;
             }
             Navigator.of(context).pop(target);
@@ -282,7 +283,8 @@ class _StorageField extends ConsumerWidget {
         decoration: InputDecoration(
           labelText: '备份存储',
           errorText: describeError(error),
-          suffixIcon: IconButton(
+          suffixIcon: A11yIconButton(
+            tooltip: '重新加载备份存储列表',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(storageOptionsProvider),
           ),
@@ -294,6 +296,13 @@ class _StorageField extends ConsumerWidget {
         final current = ids.contains(value)
             ? value
             : (ids.isEmpty ? null : ids.first);
+        // 选中的存储已被删除时下拉框会回退到第一项，这里把外部状态一并纠正，
+        // 否则提交出去的仍是那个已失效的存储 ID。
+        if (current != null && current != value) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) onChanged(current);
+          });
+        }
         return DropdownButtonFormField<int>(
           initialValue: current,
           isExpanded: true,
@@ -302,7 +311,11 @@ class _StorageField extends ConsumerWidget {
             for (final option in list)
               DropdownMenuItem(
                 value: option.id,
-                child: Text(option.name, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  option.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
           ],
           onChanged: (v) => onChanged(v ?? 0),
@@ -410,13 +423,13 @@ class _InfoRow extends StatelessWidget {
                 ),
               ),
               if (copyable)
-                IconButton(
+                A11yIconButton(
                   visualDensity: VisualDensity.compact,
-                  tooltip: '复制',
+                  tooltip: '复制$label',
                   icon: const Icon(Icons.copy, size: 18),
                   onPressed: () async {
                     await Clipboard.setData(ClipboardData(text: value));
-                    if (context.mounted) showSnack(context, '已复制');
+                    if (context.mounted) showSuccessSnack(context, '已复制');
                   },
                 ),
             ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -234,7 +235,8 @@ class _DnsFormState extends ConsumerState<_DnsForm> {
               hintText: spec.akHint,
               border: const OutlineInputBorder(),
               isDense: true,
-              suffixIcon: IconButton(
+              suffixIcon: A11yIconButton(
+                tooltip: _obscure ? '显示${spec.akLabel}' : '隐藏${spec.akLabel}',
                 icon: Icon(
                   _obscure ? Icons.visibility_off : Icons.visibility,
                   size: 20,

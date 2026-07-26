@@ -177,7 +177,7 @@ class _CertListPageState extends ConsumerState<CertListPage> {
         title: const Text('SSL 证书'),
         actions: [
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '更多证书操作',
             onSelected: (value) async {
               switch (value) {
                 case 'upload':
@@ -329,7 +329,8 @@ class _ListFooter extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              '加载失败：$error',
+              // 直接插值会把 `XxxException: ` 前缀暴露给用户。
+              '加载失败：${errorMessage(error!)}',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),

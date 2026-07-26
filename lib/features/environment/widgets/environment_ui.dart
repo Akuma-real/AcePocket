@@ -4,40 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/api_exception.dart';
-
-/// 把异常转成可直接展示的文案（[ApiException] 取面板返回的 msg）。
-String errorMessage(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
-
-/// 统一的顶层提示（成功 / 失败）。
-void showEnvSnack(BuildContext context, String message, {bool error = false}) {
-  if (!context.mounted) return;
-  final theme = Theme.of(context);
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(
-            color: error ? theme.colorScheme.onErrorContainer : null,
-          ),
-        ),
-        backgroundColor: error ? theme.colorScheme.errorContainer : null,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: error ? 4 : 2),
-      ),
-    );
-}
+import '../../../core/widgets/app_snack.dart';
 
 /// 复制文本到剪贴板并提示。
 Future<void> copyToClipboard(BuildContext context, String text,
     {String label = '已复制'}) async {
   await Clipboard.setData(ClipboardData(text: text));
   if (!context.mounted) return;
-  showEnvSnack(context, label);
+  showSuccessSnack(context, label);
 }
 
 /// 环境类型对应的图标。
@@ -80,6 +54,15 @@ String environmentTypeLabel(String type) {
   }
 }
 
+/// 面板用无点写法表示 PHP 版本（`83` 即 8.3），展示时补回小数点。
+///
+/// 各页面标题统一走这里，避免同一版本在「PHP 8.3」与「PHP 83」之间摇摆。
+String phpVersionText(int version) {
+  final raw = '$version';
+  if (raw.length < 2) return raw;
+  return '${raw.substring(0, raw.length - 1)}.${raw.substring(raw.length - 1)}';
+}
+
 /// PHP-FPM 负载值美化：`start time` 之类的 Unix 秒时间戳转本地时间展示。
 ///
 /// 面板把 php-fpm status 的原始值原样 `cast.ToString`，
@@ -99,7 +82,7 @@ String formatLoadValue(String name, String value) {
 /// `GET /environment/is_installed` 的探测结果文案。
 String probeText(AsyncValue<bool> probe) => probe.when(
       loading: () => '检测中…',
-      error: (error, _) => '检测失败（${errorMessage(error)}）',
+      error: (error, _) => '检测失败（${describeError(error)}）',
       data: (value) => value ? '已安装' : '未安装',
     );
 
@@ -229,8 +212,11 @@ class HintBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color =
-        warning ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant;
+    // 警告态用 onErrorContainer 而非 error：底色是 errorContainer 的半透明叠加，
+    // error 在浅色主题下只有约 4.8:1，onErrorContainer 两种主题都远超 AA。
+    final color = warning
+        ? theme.colorScheme.onErrorContainer
+        : theme.colorScheme.onSurfaceVariant;
     return Container(
       margin: margin,
       padding: const EdgeInsets.all(12),

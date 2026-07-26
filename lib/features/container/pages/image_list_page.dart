@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/container_image.dart';
 import '../models/json_utils.dart';
@@ -30,7 +31,7 @@ class ImageListPage extends ConsumerWidget {
     final ok = await showConfirmDialog(
       context,
       title: '删除镜像',
-      content: '确定要删除「${image.displayName}」吗？'
+      content: '确定要删除镜像「${image.displayName}」吗？此操作不可恢复。'
           '${image.inUse ? '\n该镜像仍被 ${image.containers} 个容器使用，删除可能失败。' : ''}',
       confirmText: '删除',
       danger: true,
@@ -75,14 +76,14 @@ class ImageListPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('镜像管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新镜像列表',
             icon: const Icon(Icons.refresh),
             onPressed: () =>
                 ref.read(containerImagesProvider.notifier).reload(),
           ),
-          IconButton(
-            tooltip: '清理未使用镜像',
+          A11yIconButton(
+            tooltip: '清理未使用的镜像',
             icon: const Icon(Icons.cleaning_services_outlined),
             onPressed: () => _prune(context, ref),
           ),
@@ -151,29 +152,30 @@ class _ImageTile extends StatelessWidget {
                         style: theme.textTheme.titleSmall,
                       ),
                       const SizedBox(height: 6),
-                      Row(
+                      // 用 Wrap 而非 Row：窄屏 + 长体积文本时会换行而不是溢出。
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
                         children: [
                           if (image.dangling)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 6),
-                              child: StatusBadge(
-                                label: '悬空',
-                                tone: BadgeTone.warning,
-                                dense: true,
-                              ),
+                            const StatusBadge(
+                              label: '悬空',
+                              tone: BadgeTone.warning,
+                              dense: true,
                             ),
                           StatusBadge(
-                            label: image.inUse
-                                ? '使用中 ${image.containers}'
-                                : '未使用',
+                            label: image.usageUnknown
+                                ? '引用数未知'
+                                : image.inUse
+                                    ? '${image.containers} 个容器使用中'
+                                    : '未使用',
                             tone: image.inUse
                                 ? BadgeTone.success
                                 : BadgeTone.neutral,
                             dense: true,
                           ),
-                          const SizedBox(width: 6),
                           StatusBadge(
-                            label: image.size.isEmpty ? '-' : image.size,
+                            label: image.size.isEmpty ? '大小未知' : image.size,
                             tone: BadgeTone.info,
                             dense: true,
                           ),
@@ -182,8 +184,8 @@ class _ImageTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除镜像',
+                A11yIconButton(
+                  tooltip: '删除镜像 ${image.displayName}',
                   icon: Icon(
                     Icons.delete_outline,
                     color: theme.colorScheme.error,

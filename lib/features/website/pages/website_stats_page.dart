@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -10,7 +13,6 @@ import '../providers/website_providers.dart';
 import '../providers/website_stat_providers.dart';
 import '../widgets/formatters.dart';
 import '../widgets/paged_stat_list.dart';
-import '../widgets/snack.dart';
 import '../widgets/stat_widgets.dart';
 
 /// 网站统计页 `/websites/:id/stats`。
@@ -104,6 +106,7 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
 
     final daysController = TextEditingController(text: '${current.days}');
     var bodyEnabled = current.bodyEnabled;
+    String? daysError;
 
     final saved = await showDialog<bool>(
       context: context,
@@ -117,10 +120,16 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
               TextField(
                 controller: daysController,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '数据保留天数',
                   helperText: '1 - 365',
+                  errorText: daysError,
                 ),
+                onChanged: (_) {
+                  if (daysError != null) {
+                    setDialogState(() => daysError = null);
+                  }
+                },
               ),
               const SizedBox(height: 8),
               SwitchListTile(
@@ -138,7 +147,15 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
+              // 就地校验：原先关掉对话框才提示越界，用户得重开重填。
+              onPressed: () {
+                final parsed = int.tryParse(daysController.text.trim());
+                if (parsed == null || parsed < 1 || parsed > 365) {
+                  setDialogState(() => daysError = '请输入 1 - 365 之间的整数');
+                  return;
+                }
+                Navigator.of(context).pop(true);
+              },
               child: const Text('保存'),
             ),
           ],
@@ -149,17 +166,13 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
     daysController.dispose();
     if (saved != true || !mounted) return;
 
-    if (days < 1 || days > 365) {
-      showSnack(context, '保留天数需在 1 - 365 之间', error: true);
-      return;
-    }
     try {
       await ref.read(websiteStatRepoProvider).saveSetting(
             current.copyWith(days: days, bodyEnabled: bodyEnabled),
           );
       if (!mounted) return;
       ref.invalidate(statSettingProvider);
-      showSnack(context, '统计设置已保存');
+      showSuccessSnack(context, '统计设置已保存');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }
@@ -178,7 +191,7 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
     try {
       await ref.read(websiteStatRepoProvider).clear();
       if (!mounted) return;
-      showSnack(context, '统计数据已清空');
+      showSuccessSnack(context, '统计数据已清空');
       _refreshAll(base, slow, errors, geo);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -225,10 +238,16 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(siteName),
+              Text(
+                siteName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               Text(
                 '${_range.label} · ${_range.start}'
                 '${_range.isSingleDay ? '' : ' ~ ${_range.end}'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -261,13 +280,13 @@ class _WebsiteStatsPageState extends ConsumerState<WebsiteStatsPage> {
                 PopupMenuItem(value: 'custom', child: Text('自定义范围…')),
               ],
             ),
-            IconButton(
-              tooltip: '刷新',
+            A11yIconButton(
+              tooltip: '刷新全部统计数据',
               icon: const Icon(Icons.refresh),
               onPressed: () => _refreshAll(base, slow, errors, geo),
             ),
             PopupMenuButton<String>(
-              tooltip: '更多',
+              tooltip: '统计页的更多操作',
               onSelected: (value) {
                 switch (value) {
                   case 'setting':
@@ -384,8 +403,8 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
             children: [
               SectionCard(
                 title: '全站实时',
-                trailing: IconButton(
-                  tooltip: '刷新',
+                trailing: A11yIconButton(
+                  tooltip: '刷新全站实时数据',
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.refresh, size: 18),
                   onPressed: () => ref.invalidate(statRealtimeProvider),
@@ -393,7 +412,7 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
                 child: realtimeAsync.when(
                   loading: () => const LinearProgressIndicator(),
                   error: (e, _) => Text(
-                    '实时数据获取失败：${errorMessage(e)}',
+                    '实时数据获取失败：${describeError(e)}',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.error),
                   ),
@@ -401,12 +420,12 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
                     tiles: [
                       StatMetricTile(
                         label: '出站速率',
-                        value: formatRate(realtime.bandwidth),
+                        value: formatBytesRate(realtime.bandwidth),
                         icon: Icons.upload_outlined,
                       ),
                       StatMetricTile(
                         label: '入站速率',
-                        value: formatRate(realtime.bandwidthIn),
+                        value: formatBytesRate(realtime.bandwidthIn),
                         icon: Icons.download_outlined,
                       ),
                       StatMetricTile(

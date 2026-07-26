@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -24,8 +26,8 @@ class SmartPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('SMART 健康'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新 SMART 数据',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(smartDisksProvider);
@@ -178,11 +180,14 @@ class _SmartDetail extends ConsumerWidget {
           Row(
             children: [
               if (passed != null)
-                TagChip(
-                  label: passed ? '健康状态 正常' : '健康状态 异常',
-                  icon: passed ? Icons.verified_outlined : Icons.error_outline,
-                  color:
-                      passed ? theme.colorScheme.primary : theme.colorScheme.error,
+                Flexible(
+                  child: TagChip(
+                    label: passed ? '健康状态 正常' : '健康状态 异常',
+                    icon: passed ? Icons.verified_outlined : Icons.error_outline,
+                    color: passed
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.error,
+                  ),
                 ),
               const Spacer(),
               if (temperature != null)
@@ -272,26 +277,34 @@ class _SmartDetail extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        info.isNvme ? attr.value : attr.raw,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      if (!info.isNvme)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: TagChip(
-                            label: attr.failed ? attr.whenFailed : '正常',
-                            color: attr.failed
-                                ? theme.colorScheme.error
-                                : theme.colorScheme.primary,
+                  // 原始值来自 smartctl，个别属性会是
+                  // 「12345 (Average 678)」这类长串；不加 Flexible
+                  // 会把左侧 Expanded 挤成 0 宽并触发横向溢出。
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          info.isNvme ? attr.value : attr.raw,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontFamily: 'monospace',
                           ),
                         ),
-                    ],
+                        if (!info.isNvme)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: TagChip(
+                              label: attr.failed ? attr.whenFailed : '正常',
+                              color: attr.failed
+                                  ? theme.colorScheme.error
+                                  : theme.colorScheme.primary,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),

@@ -1,9 +1,16 @@
 /// 网站模块内的展示格式化工具。
+///
+/// 字节体积 / 速率 / 百分比统一复用 `core/utils/format.dart`：
+/// 本文件曾自带一份基于 `log(bytes) / log(1024)` 的 `formatBytes`，
+/// 在 `0 < bytes < 1` 时会算出负下标并抛 `RangeError`（零流量站点在概览页
+/// 切到「出站流量」即触发），已删除。其余函数（千分位、耗时、面板时间）
+/// 是网站模块特有的，保留在这里。
 library;
 
-import 'dart:math' as math;
-
 import 'package:intl/intl.dart';
+
+export '../../../core/utils/format.dart'
+    show formatBytes, formatBytesRate, formatPercent;
 
 /// 千分位格式化器（不指定 locale，避免依赖未初始化的本地化数据）。
 final NumberFormat _decimal = NumberFormat.decimalPattern();
@@ -20,32 +27,12 @@ String formatCompactCount(num value) {
   return '${(value / 100000000).toStringAsFixed(2)}亿';
 }
 
-/// 字节数转可读体积，如 `1.25 GB`。
-String formatBytes(num bytes, {int fractionDigits = 2}) {
-  if (bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  final i = math.min(
-    (math.log(bytes) / math.log(1024)).floor(),
-    units.length - 1,
-  );
-  final value = bytes / math.pow(1024, i);
-  if (i == 0) return '${value.toStringAsFixed(0)} B';
-  return '${value.toStringAsFixed(fractionDigits)} ${units[i]}';
-}
-
-/// 速率（字节/秒）。
-String formatRate(num bytesPerSecond) => '${formatBytes(bytesPerSecond)}/s';
-
 /// 毫秒转可读耗时，如 `320 ms` / `1.25 s`。
 String formatMilliseconds(num ms) {
-  if (ms <= 0) return '0 ms';
+  if (ms.isNaN || ms <= 0) return '0 ms';
   if (ms < 1000) return '${ms.toStringAsFixed(ms < 10 ? 1 : 0)} ms';
   return '${(ms / 1000).toStringAsFixed(2)} s';
 }
-
-/// 百分比，如 `12.3%`。
-String formatPercent(num value, {int fractionDigits = 1}) =>
-    '${value.toStringAsFixed(fractionDigits)}%';
 
 /// 环比变化：`+12.3%` / `-4.0%` / `—`（基数为 0 时）。
 String formatDelta(num current, num previous) {

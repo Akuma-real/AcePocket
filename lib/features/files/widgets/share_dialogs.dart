@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/app_snack.dart';
+
 /// 创建分享的表单结果（对应 `POST /api/file_share` 的请求字段）。
 typedef ShareCreateResult = ({String path, int expireHours, int maxDownloads});
 
@@ -100,9 +102,14 @@ class _ShareCreateDialogState extends State<_ShareCreateDialog> {
               TextField(
                 controller: _pathController,
                 readOnly: !widget.pathEditable,
-                decoration: const InputDecoration(
+                maxLines: 2,
+                minLines: 1,
+                decoration: InputDecoration(
                   labelText: '文件路径',
-                  helperText: '仅支持分享文件，不能分享目录',
+                  helperText: widget.pathEditable
+                      ? '仅支持分享文件，不能分享目录'
+                      : '路径来自所选文件，不可修改',
+                  helperMaxLines: 2,
                 ),
                 onChanged: (_) {
                   if (_error != null) setState(() => _error = null);
@@ -192,6 +199,8 @@ Future<void> showShareLinkDialog(
     builder: (context) {
       final theme = Theme.of(context);
       return AlertDialog(
+        // 链接较长时（带访问入口的地址）内容区可滚动，避免溢出。
+        scrollable: true,
         title: const Text('分享链接'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -219,10 +228,11 @@ Future<void> showShareLinkDialog(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: url));
               if (!context.mounted) return;
+              // 必须先弹提示再关对话框：pop 之后本 context 已失活，
+              // showSuccessSnack 会因 !context.mounted 直接返回，提示就丢了。
+              // SnackBar 挂在上层 ScaffoldMessenger 上，不随对话框一起消失。
+              showSuccessSnack(context, '下载链接已复制到剪贴板');
               Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('链接已复制到剪贴板')),
-              );
             },
             icon: const Icon(Icons.copy_all_outlined),
             label: const Text('复制链接'),

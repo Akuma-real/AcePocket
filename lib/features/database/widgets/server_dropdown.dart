@@ -45,6 +45,7 @@ class ServerDropdown extends StatelessWidget {
               showType
                   ? '${server.name}（${dbTypeLabel(server.type)} · ${server.displayAddress}）'
                   : '${server.name}（${server.displayAddress}）',
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),

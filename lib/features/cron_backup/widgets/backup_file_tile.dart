@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/backup_file.dart';
 import 'format.dart';
 
@@ -68,6 +69,8 @@ class BackupFileTile extends StatelessWidget {
               Text(
                 '${file.size.isEmpty ? '-' : file.size}  ·  '
                 '${formatDateTime(file.time)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -85,26 +88,26 @@ class BackupFileTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  IconButton(
-                    tooltip: '文件信息',
+                  A11yIconButton(
+                    tooltip: '查看备份文件信息',
                     icon: const Icon(Icons.info_outline),
                     onPressed: onInfo,
                   ),
                   if (onDownload != null)
-                    IconButton(
-                      tooltip: '下载到本机',
+                    A11yIconButton(
+                      tooltip: '下载备份到本机',
                       icon: const Icon(Icons.download_outlined),
                       onPressed: onDownload,
                     ),
                   if (onRestore != null)
-                    IconButton(
-                      tooltip: '恢复',
+                    A11yIconButton(
+                      tooltip: '用此备份恢复',
                       icon: const Icon(Icons.settings_backup_restore),
                       onPressed: onRestore,
                     ),
                   if (onDelete != null)
-                    IconButton(
-                      tooltip: '删除',
+                    A11yIconButton(
+                      tooltip: '删除此备份',
                       icon: Icon(Icons.delete_outline,
                           color: colorScheme.error),
                       onPressed: onDelete,

@@ -224,6 +224,8 @@ class _DownloadResultDialogState extends State<_DownloadResultDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
+      // 保存路径较长时内容可能超出屏幕高度。
+      scrollable: true,
       title: const Text('下载完成'),
       content: SizedBox(
         width: 480,

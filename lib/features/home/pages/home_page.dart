@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -53,13 +55,11 @@ class HomePage extends ConsumerWidget {
     try {
       await ref.read(homeRepoProvider).restartPanel();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('面板正在重启，请稍后手动刷新')),
-      );
-    } on ApiException catch (e) {
+      showSuccessSnack(context, '重启指令已下发，面板重启完成后下拉刷新即可');
+    } catch (e) {
+      // 网络层异常（超时 / 证书）不是 ApiException，此前会漏掉、静默失败。
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      showErrorSnack(context, e);
     }
   }
 
@@ -75,13 +75,10 @@ class HomePage extends ConsumerWidget {
     try {
       await ref.read(homeRepoProvider).restartServer();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已下发重启指令，服务器即将重启')),
-      );
-    } on ApiException catch (e) {
+      showSuccessSnack(context, '重启指令已下发，服务器即将重启');
+    } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      showErrorSnack(context, e);
     }
   }
 
@@ -151,6 +148,8 @@ class HomePage extends ConsumerWidget {
           children: [
             Text(
               panelName == null || panelName.isEmpty ? 'AcePanel' : panelName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleMedium,
             ),
             Text(
@@ -164,13 +163,13 @@ class HomePage extends ConsumerWidget {
           ],
         ),
         actions: [
-          IconButton(
+          A11yIconButton(
             icon: const Icon(Icons.insights_rounded),
-            tooltip: '历史监控',
+            tooltip: '查看历史监控图表',
             onPressed: () => context.push('/monitor'),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '打开更多操作菜单',
             onSelected: (value) {
               switch (value) {
                 case 'refresh':
@@ -278,9 +277,7 @@ class _StaleHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final message = error is ApiException
-        ? (error as ApiException).message
-        : '$error'.replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
+    final message = describeError(error);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

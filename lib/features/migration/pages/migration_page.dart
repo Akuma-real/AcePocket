@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/storage/server_store.dart';
 import '../../../core/utils/url_validation.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/feature_gate.dart';
@@ -94,18 +95,18 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       appBar: AppBar(
         title: const Text('面板迁移'),
         actions: [
-          IconButton(
-            tooltip: '结果查看',
+          A11yIconButton(
+            tooltip: '查看迁移结果',
             icon: const Icon(Icons.fact_check_outlined),
             onPressed: () => context.push('/migration/results'),
           ),
-          IconButton(
-            tooltip: '刷新状态',
+          A11yIconButton(
+            tooltip: '刷新迁移状态',
             icon: const Icon(Icons.refresh),
             onPressed: state.busy ? null : () => _notifier.init(force: true),
           ),
-          IconButton(
-            tooltip: '重置迁移',
+          A11yIconButton(
+            tooltip: '重置迁移状态',
             icon: const Icon(Icons.restart_alt),
             onPressed: state.busy || state.stage == MigrationStage.running
                 ? null
@@ -223,7 +224,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
               autocorrect: false,
               decoration: InputDecoration(
                 labelText: '面板地址',
-                hintText: 'https://1.2.3.4:8888',
+                // 示例地址用 RFC 5737 文档专用网段，避免示意成真实主机。
+                hintText: 'https://192.0.2.1:8888',
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(Icons.link),
                 // 未输入时不提示错误；输入后实时校验（校验不通过时
@@ -268,7 +270,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                 hintText: '远程面板 API 令牌',
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(Icons.key),
-                suffixIcon: IconButton(
+                suffixIcon: A11yIconButton(
+                  tooltip: _obscureToken ? '显示访问令牌' : '隐藏访问令牌',
                   icon: Icon(_obscureToken
                       ? Icons.visibility_outlined
                       : Icons.visibility_off_outlined),

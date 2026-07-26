@@ -105,17 +105,44 @@ class MonitorChartCard extends StatelessWidget {
     ].join(' · ');
 
     if (length < 2) {
+      // 只有 0 / 1 个采样点时画不出折线，但唯一的那个采样值仍是有效信息，
+      // 直接以文字列出，避免「什么都看不到」。
+      final single = length == 1;
       return SectionCard(
         title: title,
         trailing: trailing,
         child: SizedBox(
           height: 96,
           child: Center(
-            child: Text(
-              '该时间段数据点不足，无法绘制图表',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  single ? '该时间段只采集到 1 个数据点，暂时画不出趋势' : '该时间段没有采集到监控数据',
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (single) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    [
+                      for (final s in series)
+                        '${s.name} ${valueFormatter(s.values.first)}',
+                    ].join('  ·  '),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: kTabularFigures,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -135,12 +162,20 @@ class MonitorChartCard extends StatelessWidget {
     }
     if (!bottom.isFinite) bottom = 0;
     if (!top.isFinite) top = 1;
-    if (top - bottom < 1e-9) top = bottom + (bottom.abs() < 1e-9 ? 1 : bottom.abs() * 0.2);
+    if (top - bottom < 1e-9) {
+      top = bottom + (bottom.abs() < 1e-9 ? 1 : bottom.abs() * 0.2);
+    }
     final padding = (top - bottom) * 0.1;
     if (maxY == null) top += padding;
     if (minY == null) bottom = math.max(0, bottom - padding);
 
     final labelInterval = math.max(1, (length / 4).ceil()).toDouble();
+
+    // 提示气泡：底色与文字色成对取自 ColorScheme，Material 3 保证这对颜色
+    // 在深浅两种主题下都满足文字对比度要求。底色不再加透明度——半透明会把
+    // 身后的曲线透进来，进一步压低实际对比度。
+    final tooltipBackground = theme.colorScheme.inverseSurface;
+    final tooltipForeground = theme.colorScheme.onInverseSurface;
 
     return SectionCard(
       title: title,
@@ -185,138 +220,186 @@ class MonitorChartCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: height,
-            child: LineChart(
-              LineChartData(
-                minX: 0,
-                maxX: (length - 1).toDouble(),
-                minY: bottom,
-                maxY: top,
-                clipData: FlClipData.all(),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: (top - bottom) / 4,
-                  getDrawingHorizontalLine: (value) => FlLine(
-                    color: theme.colorScheme.outlineVariant,
-                    strokeWidth: 1,
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  show: true,
-                  topTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 52,
-                      interval: (top - bottom) / 4,
-                      getTitlesWidget: (value, meta) => SideTitleWidget(
-                        axisSide: meta.axisSide,
-                        space: 6,
-                        child: Text(
-                          valueFormatter(value),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontSize: 9,
+          // 折线图对读屏用户完全不可见（fl_chart 只画 CustomPaint，语义树里
+          // 什么都没有）。这里把「时间范围 + 每条序列的当前值 / 峰值 / 谷值」
+          // 汇总成一句话挂到语义节点上，作为图形的文字替代；图表本身用
+          // ExcludeSemantics 兜住，避免日后 fl_chart 加入语义时重复播报。
+          Semantics(
+            container: true,
+            label: _semanticsLabel(rawLength),
+            child: ExcludeSemantics(
+              child: SizedBox(
+                height: height,
+                child: LineChart(
+                  LineChartData(
+                    minX: 0,
+                    maxX: (length - 1).toDouble(),
+                    minY: bottom,
+                    maxY: top,
+                    clipData: FlClipData.all(),
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      horizontalInterval: (top - bottom) / 4,
+                      getDrawingHorizontalLine: (value) => FlLine(
+                        color: theme.colorScheme.outlineVariant,
+                        strokeWidth: 1,
+                      ),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    titlesData: FlTitlesData(
+                      show: true,
+                      topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 52,
+                          interval: (top - bottom) / 4,
+                          getTitlesWidget: (value, meta) => SideTitleWidget(
+                            axisSide: meta.axisSide,
+                            space: 6,
+                            child: Text(
+                              valueFormatter(value),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 9,
+                              ),
+                            ),
                           ),
                         ),
                       ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 28,
+                          interval: labelInterval,
+                          getTitlesWidget: (value, meta) {
+                            final index = value.round();
+                            if (index < 0 || index >= length) {
+                              return const SizedBox.shrink();
+                            }
+                            return SideTitleWidget(
+                              axisSide: meta.axisSide,
+                              space: 6,
+                              child: Text(
+                                formatChartTime(times[index],
+                                    withDate: withDate),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 9,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 28,
-                      interval: labelInterval,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-                        if (index < 0 || index >= length) {
-                          return const SizedBox.shrink();
-                        }
-                        return SideTitleWidget(
-                          axisSide: meta.axisSide,
-                          space: 6,
-                          child: Text(
-                            formatChartTime(times[index], withDate: withDate),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontSize: 9,
-                            ),
-                          ),
-                        );
-                      },
+                    lineTouchData: LineTouchData(
+                      enabled: true,
+                      handleBuiltInTouches: true,
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipColor: (_) => tooltipBackground,
+                        tooltipRoundedRadius: 8,
+                        fitInsideHorizontally: true,
+                        fitInsideVertically: true,
+                        getTooltipItems: (touchedSpots) {
+                          // 文字一律用与气泡底色配对的 onInverseSurface——此前用系列色
+                          // 画在 inverseSurface 上，深浅两种主题下核心数值都读不清；
+                          // 系列区分改由行首的色块承担（色块是图形，只需 3:1 对比度，
+                          // 且与图例的色块一一对应）。
+                          final labelStyle = TextStyle(
+                            color: tooltipForeground.withValues(alpha: 0.82),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w400,
+                          );
+                          final valueStyle = TextStyle(
+                            color: tooltipForeground,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: kTabularFigures,
+                          );
+                          final timeStyle = TextStyle(
+                            color: tooltipForeground.withValues(alpha: 0.82),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w400,
+                            fontFeatures: kTabularFigures,
+                          );
+
+                          final items = <LineTooltipItem>[];
+                          for (var i = 0; i < touchedSpots.length; i++) {
+                            final spot = touchedSpots[i];
+                            final s = spot.barIndex < series.length
+                                ? series[spot.barIndex]
+                                : null;
+                            final index = spot.spotIndex;
+                            final prefix =
+                                i == 0 && index >= 0 && index < times.length
+                                    ? '${formatTooltipTime(times[index])}\n'
+                                    : '';
+                            items.add(
+                              LineTooltipItem(
+                                prefix,
+                                timeStyle,
+                                textAlign: TextAlign.left,
+                                children: [
+                                  if (s != null)
+                                    TextSpan(
+                                      text: '■ ',
+                                      style: TextStyle(
+                                        color: _readableSwatch(
+                                          s.color,
+                                          tooltipBackground,
+                                          tooltipForeground,
+                                        ),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  if (s != null)
+                                    TextSpan(
+                                        text: '${s.name}  ', style: labelStyle),
+                                  TextSpan(
+                                    text: valueFormatter(spot.y),
+                                    style: valueStyle,
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          return items;
+                        },
+                      ),
                     ),
-                  ),
-                ),
-                lineTouchData: LineTouchData(
-                  enabled: true,
-                  handleBuiltInTouches: true,
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (_) =>
-                        theme.colorScheme.inverseSurface.withValues(alpha: 0.92),
-                    tooltipRoundedRadius: 8,
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                    getTooltipItems: (touchedSpots) {
-                      final items = <LineTooltipItem>[];
-                      for (var i = 0; i < touchedSpots.length; i++) {
-                        final spot = touchedSpots[i];
-                        final name = spot.barIndex < series.length
-                            ? series[spot.barIndex].name
-                            : '';
-                        final color = spot.barIndex < series.length
-                            ? series[spot.barIndex].color
-                            : theme.colorScheme.onInverseSurface;
-                        final index = spot.spotIndex;
-                        final prefix = i == 0 && index < times.length
-                            ? '${formatTooltipTime(times[index])}\n'
-                            : '';
-                        items.add(
-                          LineTooltipItem(
-                            '$prefix$name  ${valueFormatter(spot.y)}',
-                            TextStyle(
-                              color: color,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        );
-                      }
-                      return items;
-                    },
-                  ),
-                ),
-                lineBarsData: [
-                  for (final s in series)
-                    LineChartBarData(
-                      spots: [
-                        for (var i = 0; i < length; i++)
-                          FlSpot(i.toDouble(), s.values[i]),
-                      ],
-                      isCurved: true,
-                      curveSmoothness: 0.2,
-                      preventCurveOverShooting: true,
-                      color: s.color,
-                      barWidth: 2,
-                      dotData: FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: series.length == 1,
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            s.color.withValues(alpha: 0.24),
-                            s.color.withValues(alpha: 0.02),
+                    lineBarsData: [
+                      for (final s in series)
+                        LineChartBarData(
+                          spots: [
+                            for (var i = 0; i < length; i++)
+                              FlSpot(i.toDouble(), s.values[i]),
                           ],
+                          isCurved: true,
+                          curveSmoothness: 0.2,
+                          preventCurveOverShooting: true,
+                          color: s.color,
+                          barWidth: 2,
+                          dotData: FlDotData(show: false),
+                          belowBarData: BarAreaData(
+                            show: series.length == 1,
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                s.color.withValues(alpha: 0.24),
+                                s.color.withValues(alpha: 0.02),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -335,4 +418,61 @@ class MonitorChartCard extends StatelessWidget {
         first.month != last.month ||
         first.day != last.day;
   }
+
+  /// 图表的文字替代：时间范围 + 每条序列的当前值 / 峰值（含出现时刻）/ 谷值。
+  ///
+  /// 用**抽样前**的原始序列统计，保证峰值与其时刻精确到实际采样点；
+  /// 时刻一律带日期（读屏没有横轴做上下文）。
+  String _semanticsLabel(int length) {
+    if (length < 2) return '$title 趋势图，数据点不足，无法绘制';
+
+    String at(int index) => index >= 0 && index < times.length
+        ? formatTooltipTime(times[index])
+        : '未知时间';
+
+    final buffer = StringBuffer('$title 趋势图，')
+      ..write('时间范围 ${at(0)} 至 ${at(length - 1)}，')
+      ..write('共 $length 个数据点。');
+
+    for (final s in series) {
+      final count = math.min(length, s.values.length);
+      if (count == 0) continue;
+      var maxIndex = 0;
+      var minIndex = 0;
+      for (var i = 1; i < count; i++) {
+        if (s.values[i] > s.values[maxIndex]) maxIndex = i;
+        if (s.values[i] < s.values[minIndex]) minIndex = i;
+      }
+      buffer
+        ..write('${s.name}：当前 ${valueFormatter(s.values[count - 1])}，')
+        ..write('峰值 ${valueFormatter(s.values[maxIndex])} '
+            '出现在 ${at(maxIndex)}，')
+        ..write('最低 ${valueFormatter(s.values[minIndex])}。');
+    }
+    return buffer.toString();
+  }
+}
+
+/// 提示气泡里的系列色块颜色。
+///
+/// 气泡底色是 `inverseSurface`（浅色主题下接近黑、深色主题下接近白），
+/// 而系列色是为卡片底色（`surfaceContainerLow`）挑的，直接画上去可能糊成
+/// 一团。这里在保留色相的前提下朝前景色混合，直到对比度达到 Material
+/// 对非文字图形的下限 3:1。
+Color _readableSwatch(Color color, Color background, Color foreground) {
+  var result = color;
+  for (var step = 1; step <= 10; step++) {
+    if (_contrastRatio(result, background) >= 3.0) break;
+    result = Color.lerp(color, foreground, step / 10)!;
+  }
+  return result;
+}
+
+/// WCAG 相对亮度对比度（1.0 - 21.0）。
+double _contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  final high = math.max(la, lb);
+  final low = math.min(la, lb);
+  return (high + 0.05) / (low + 0.05);
 }

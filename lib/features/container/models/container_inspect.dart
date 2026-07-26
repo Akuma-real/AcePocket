@@ -1,3 +1,4 @@
+import '../../../core/utils/format.dart';
 import 'json_utils.dart';
 
 /// 容器详情（`GET /api/container/container/{id}`）。

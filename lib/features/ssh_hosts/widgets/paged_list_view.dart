@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -19,6 +20,7 @@ class PagedListView<T> extends StatefulWidget {
     this.emptyIcon = Icons.inbox_outlined,
     this.emptyAction,
     this.padding = const EdgeInsets.fromLTRB(0, 4, 0, 96),
+    this.totalLabel,
   });
 
   final AsyncValue<PagedState<T>> state;
@@ -38,6 +40,9 @@ class PagedListView<T> extends StatefulWidget {
   final IconData emptyIcon;
   final Widget? emptyAction;
   final EdgeInsetsGeometry padding;
+
+  /// 列表底部「已全部加载」时的统计文案；默认「共 N 项」。
+  final String Function(int total)? totalLabel;
 
   @override
   State<PagedListView<T>> createState() => _PagedListViewState<T>();
@@ -116,6 +121,8 @@ class _PagedListViewState<T> extends State<PagedListView<T>> {
             loading: paged.loadingMore,
             hasMore: paged.hasMore,
             total: paged.total,
+            error: paged.loadMoreError,
+            totalLabel: widget.totalLabel ?? ((total) => '共 $total 项'),
             onLoadMore: widget.onLoadMore,
           );
         },
@@ -129,17 +136,47 @@ class _Footer extends StatelessWidget {
     required this.loading,
     required this.hasMore,
     required this.total,
+    required this.error,
+    required this.totalLabel,
     required this.onLoadMore,
   });
 
   final bool loading;
   final bool hasMore;
   final int total;
+
+  /// 加载下一页失败时的错误（展示后可点击重试）。
+  final Object? error;
+  final String Function(int total) totalLabel;
   final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (!loading && error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          children: [
+            Text(
+              '加载下一页失败：${describeError(error!)}',
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onLoadMore,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
     final Widget child;
     if (loading) {
       child = const SizedBox(
@@ -154,7 +191,10 @@ class _Footer extends StatelessWidget {
       );
     } else {
       child = Text(
-        '共 $total 台主机',
+        totalLabel(total),
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),

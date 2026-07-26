@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -23,28 +25,39 @@ class FstabTab extends ConsumerStatefulWidget {
 class _FstabTabState extends ConsumerState<FstabTab> {
   String? _busy;
 
+  /// 确认对话框是否已经弹出，避免连点删除两次同一条目。
+  bool _inFlow = false;
+
+  bool get _locked => _busy != null || _inFlow;
+
   Future<void> _delete(FstabEntry entry) async {
-    final confirmed = await showConfirmDialog(
-      context,
-      title: '删除 ${entry.mountPoint} 的自动挂载？',
-      content: '将从 /etc/fstab 中移除该条目，系统重启后不再自动挂载，'
-          '面板随后会执行 mount -a 重新加载配置。当前已挂载的分区不会被卸载。',
-      confirmText: '删除',
-      danger: true,
-    );
-    if (!confirmed) return;
-    setState(() => _busy = entry.mountPoint);
+    if (_locked) return;
+    setState(() => _inFlow = true);
     try {
-      await ref.read(toolboxDiskRepoProvider).deleteFstab(entry.mountPoint);
-      ref.invalidate(fstabProvider);
-      ref.invalidate(diskListProvider);
-      if (!mounted) return;
-      showSnack(context, '已删除 ${entry.mountPoint} 的自动挂载配置');
-    } catch (e) {
-      if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      final confirmed = await showConfirmDialog(
+        context,
+        title: '删除 ${entry.mountPoint} 的自动挂载？',
+        content: '将从 /etc/fstab 中移除该条目，系统重启后不再自动挂载，'
+            '面板随后会执行 mount -a 重新加载配置。当前已挂载的分区不会被卸载。',
+        confirmText: '删除',
+        danger: true,
+      );
+      if (!confirmed || !mounted) return;
+      setState(() => _busy = entry.mountPoint);
+      try {
+        await ref.read(toolboxDiskRepoProvider).deleteFstab(entry.mountPoint);
+        ref.invalidate(fstabProvider);
+        ref.invalidate(diskListProvider);
+        if (!mounted) return;
+        showSuccessSnack(context, '已删除 ${entry.mountPoint} 的自动挂载配置');
+      } catch (e) {
+        if (!mounted) return;
+        showErrorSnack(context, e);
+      } finally {
+        if (mounted) setState(() => _busy = null);
+      }
     } finally {
-      if (mounted) setState(() => _busy = null);
+      if (mounted) setState(() => _inFlow = false);
     }
   }
 
@@ -108,27 +121,34 @@ class _FstabTabState extends ConsumerState<FstabTab> {
               Expanded(
                 child: Text(
                   entry.mountPoint,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontFamily: 'monospace',
                   ),
                 ),
               ),
               if (entry.isRoot)
-                TagChip(label: '根挂载点', color: theme.colorScheme.error),
+                Flexible(
+                  child: TagChip(
+                    label: '根挂载点',
+                    color: theme.colorScheme.error,
+                  ),
+                ),
               if (busy)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12),
                   child: BusyIndicator(),
                 )
               else if (!entry.isRoot)
-                IconButton(
-                  tooltip: '删除条目',
+                A11yIconButton(
+                  tooltip: '删除 ${entry.mountPoint} 的自动挂载条目',
                   icon: Icon(
                     Icons.delete_outline,
                     size: 20,
                     color: theme.colorScheme.error,
                   ),
-                  onPressed: _busy != null ? null : () => _delete(entry),
+                  onPressed: _locked ? null : () => _delete(entry),
                 ),
             ],
           ),

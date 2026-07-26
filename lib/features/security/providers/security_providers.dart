@@ -55,8 +55,10 @@ final tamperStatusProvider = FutureProvider.autoDispose<TamperStatus>(
 
 /// 待检查保护状态的路径列表（防篡改「路径保护」分页维护）。
 ///
-/// 不使用 autoDispose，避免切换 tab / 弹窗返回时用户输入的路径被清空；
-/// 切换服务器时由页面自行清理。
+/// 不使用 autoDispose，避免切换 tab / 弹窗返回时用户输入的路径被清空。
+/// 切换服务器后列表**会保留**（都是用户手输的字符串，无服务器归属），
+/// 但 [tamperPathCheckProvider] 会随 repo 重建重新查询，展示的是新服务器的
+/// 保护状态，不会串数据。
 final tamperCheckPathListProvider =
     StateProvider<List<String>>((ref) => const <String>[]);
 

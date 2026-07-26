@@ -4,13 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/template.dart';
 import '../providers/template_providers.dart';
 import '../widgets/code_block.dart';
-import '../widgets/snack.dart';
 import '../widgets/template_icon.dart';
 
 /// 模板详情页 `/templates/:slug`。
@@ -26,11 +27,15 @@ class TemplateDetailPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(detailAsync.valueOrNull?.name ?? '模板详情'),
+        title: Text(
+          detailAsync.valueOrNull?.name ?? '模板详情',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           if (detailAsync.valueOrNull != null)
-            IconButton(
-              tooltip: '上报下载回调',
+            A11yIconButton(
+              tooltip: '向应用商店上报一次下载量',
               onPressed: () => _callback(context, ref, detailAsync.value!),
               icon: const Icon(Icons.cloud_upload_outlined),
             ),
@@ -164,12 +169,12 @@ class TemplateDetailPage extends ConsumerWidget {
     AppTemplate template,
   ) async {
     if (template.local) {
-      showSnack(context, '本地模板无需上报下载回调');
+      showInfoSnack(context, '本地模板无需上报下载量');
       return;
     }
     try {
       await ref.read(templateRepoProvider).callback(template.slug);
-      if (context.mounted) showSnack(context, '已上报下载回调');
+      if (context.mounted) showSuccessSnack(context, '已上报下载量');
     } catch (e) {
       if (context.mounted) showErrorSnack(context, e);
     }
@@ -267,10 +272,13 @@ class _InfoList extends StatelessWidget {
                   ),
                 ),
                 Expanded(
+                  // 长按复制该项内容。
                   child: GestureDetector(
                     onLongPress: () async {
                       await Clipboard.setData(ClipboardData(text: item.$2));
-                      if (context.mounted) showSnack(context, '已复制');
+                      if (context.mounted) {
+                        showSuccessSnack(context, '已复制「${item.$1}」');
+                      }
                     },
                     child: Text(item.$2, style: theme.textTheme.bodyMedium),
                   ),

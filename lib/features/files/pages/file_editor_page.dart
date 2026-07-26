@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../models/file_item.dart';
 import '../providers/files_providers.dart';
 
@@ -94,41 +95,12 @@ class _FileEditorPageState extends ConsumerState<FileEditorPage> {
         _dirty = false;
         _saving = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已保存')),
-      );
+      showSuccessSnack(context, '已保存到 ${posixBaseName(widget.path)}');
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      // describeError：非 ApiException 时避免露出原始英文异常。
-      _showError(describeError(e));
-    }
-  }
-
-  void _showError(String message) {
-    final theme = Theme.of(context);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: theme.colorScheme.errorContainer,
-        showCloseIcon: true,
-      ));
-  }
-
-  Future<void> _confirmLeave() async {
-    final ok = await showConfirmDialog(
-      context,
-      title: '放弃修改',
-      content: '「${posixBaseName(widget.path)}」有未保存的修改，确定要离开吗？',
-      confirmText: '放弃',
-      danger: true,
-    );
-    if (!ok || !mounted) return;
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go('/files');
+      // 统一错误提示：core 的 showErrorSnack 内部已做 describeError。
+      showErrorSnack(context, e);
     }
   }
 
@@ -154,26 +126,40 @@ class _FileEditorPageState extends ConsumerState<FileEditorPage> {
           width: double.infinity,
           color: theme.colorScheme.surfaceContainerLow,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  widget.path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+          child: LayoutBuilder(
+            builder: (context, constraints) => Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                content.mime.isEmpty ? '未知类型' : content.mime.split(';').first,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                const SizedBox(width: 8),
+                // MIME 可能很长（docx / xlsx 的 vnd.openxmlformats-… 上百字符），
+                // 不限宽会把左侧路径挤到 0 宽完全看不见；
+                // 这里最多占四成宽度，短 MIME 仍按自身宽度展示。
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxWidth: constraints.maxWidth * 0.4),
+                  child: Text(
+                    content.mime.isEmpty
+                        ? '未知类型'
+                        : content.mime.split(';').first,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         if (!content.looksLikeText)
@@ -250,12 +236,11 @@ class _FileEditorPageState extends ConsumerState<FileEditorPage> {
 
     contentAsync.whenData(_applyContent);
 
-    return PopScope(
-      canPop: !_dirty,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        _confirmLeave();
-      },
+    // 未保存拦截统一交给 core 的 UnsavedChangesGuard：
+    // AppBar 返回箭头（走 maybePop）与系统返回手势行为一致，不会静默丢草稿。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: '「${posixBaseName(widget.path)}」有未保存的修改，放弃后无法恢复。',
       child: Scaffold(
         appBar: AppBar(
           title: Text(
@@ -264,29 +249,27 @@ class _FileEditorPageState extends ConsumerState<FileEditorPage> {
             overflow: TextOverflow.ellipsis,
           ),
           actions: [
-            IconButton(
-              tooltip: '复制路径',
+            A11yIconButton(
+              tooltip: '复制文件路径',
               icon: const Icon(Icons.link),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: widget.path));
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('路径已复制到剪贴板')),
-                );
+                showSuccessSnack(context, '路径已复制到剪贴板');
               },
             ),
-            IconButton(
+            A11yIconButton(
               tooltip: _wrap ? '关闭自动换行' : '开启自动换行',
               icon: Icon(_wrap ? Icons.wrap_text : Icons.notes),
               onPressed: () => setState(() => _wrap = !_wrap),
             ),
-            IconButton(
-              tooltip: '重新加载',
+            A11yIconButton(
+              tooltip: '重新加载文件',
               icon: const Icon(Icons.refresh),
               onPressed: _saving ? null : _reload,
             ),
-            IconButton(
-              tooltip: '保存',
+            A11yIconButton(
+              tooltip: _saving ? '正在保存' : '保存文件',
               icon: _saving
                   ? const SizedBox(
                       width: 20,

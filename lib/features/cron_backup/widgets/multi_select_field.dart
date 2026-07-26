@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/error_view.dart';
 import '../models/option_item.dart';
+import 'feedback.dart';
 
 /// 多选字段：展示已选项的 Chip，点击打开底部选择面板。
 ///
@@ -49,10 +51,20 @@ class MultiSelectField extends StatelessWidget {
                 children: [
                   for (final value in selected)
                     Chip(
-                      label: Text(value),
+                      // 目录路径 / 长域名可能很长，限宽省略，
+                      // 否则单个 Chip 会把 Wrap 撑出屏幕。
+                      label: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 200),
+                        child: Text(
+                          value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       visualDensity: VisualDensity.compact,
                       materialTapTargetSize:
                           MaterialTapTargetSize.shrinkWrap,
+                      deleteButtonTooltipMessage: '移除 $value',
                       onDeleted: () => onChanged(
                         selected.where((e) => e != value).toList(),
                       ),
@@ -116,8 +128,12 @@ class _MultiSelectSheetState extends State<_MultiSelectSheet> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(widget.title,
-                        style: theme.textTheme.titleMedium),
+                    child: Text(
+                      widget.title,
+                      style: theme.textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(_selected),
@@ -171,10 +187,18 @@ class _MultiSelectSheetState extends State<_MultiSelectSheet> {
                       final checked = _selected.contains(option.value);
                       return CheckboxListTile(
                         value: checked,
-                        title: Text(option.label),
+                        title: Text(
+                          option.label,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         subtitle: option.label == option.value
                             ? null
-                            : Text(option.value),
+                            : Text(
+                                option.value,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                         onChanged: (v) {
                           setState(() {
                             if (v == true) {
@@ -242,13 +266,16 @@ class AsyncDropdownField extends StatelessWidget {
       error: (error, _) => InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          errorText: error.toString(),
-          suffixIcon: IconButton(
+          // 原先直接 toString()，会把 `ApiException: ...` 这类原始类型名
+          // 暴露给用户；统一走 describeError。
+          errorText: describeError(error),
+          suffixIcon: A11yIconButton(
+            tooltip: '重新加载$label列表',
             icon: const Icon(Icons.refresh),
             onPressed: onReload,
           ),
         ),
-        child: const Text('加载失败'),
+        child: const Text('加载失败，点击右侧按钮重试'),
       ),
       data: (list) {
         final values = list.map((e) => e.value).toList();
@@ -261,7 +288,11 @@ class AsyncDropdownField extends StatelessWidget {
             for (final option in list)
               DropdownMenuItem(
                 value: option.value,
-                child: Text(option.label, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  option.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
           ],
           onChanged: onChanged,

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -18,7 +21,6 @@ import '../widgets/kv_list_field.dart';
 import '../widgets/listen_list_field.dart';
 import '../widgets/proxy_list_field.dart';
 import '../widgets/redirect_list_field.dart';
-import '../widgets/snack.dart';
 import '../widgets/string_list_field.dart';
 
 /// 网站详情与配置页 `/websites/:id`。
@@ -51,6 +53,8 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
   bool _expireBusy = false;
   bool _obtainBusy = false;
   bool _certBusy = false;
+  bool _resetBusy = false;
+  bool _deleteBusy = false;
 
   /// 每次成功加载后自增，用于强制重建各列表编辑器的内部状态。
   int _revision = 0;
@@ -169,17 +173,17 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
     if (setting == null) return;
 
     if (setting.domains.isEmpty) {
-      showSnack(context, '请至少保留一个域名', error: true);
+      showErrorSnack(context, '请至少保留一个域名');
       return;
     }
     if (setting.listens.isEmpty) {
-      showSnack(context, '请至少保留一个监听地址', error: true);
+      showErrorSnack(context, '请至少保留一个监听地址');
       return;
     }
     for (final domain in setting.domains) {
       final error = validateDomain(domain);
       if (error != null) {
-        showSnack(context, '域名 $domain：$error', error: true);
+        showErrorSnack(context, '域名 $domain：$error');
         return;
       }
     }
@@ -188,25 +192,25 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       if (error != null) {
         final label =
             listen.address.isEmpty ? '存在未填写的监听地址' : '监听 ${listen.address}：$error';
-        showSnack(context, label, error: true);
+        showErrorSnack(context, label);
         return;
       }
     }
     if (setting.path.isEmpty || !setting.path.startsWith('/')) {
-      showSnack(context, '网站目录需为绝对路径', error: true);
+      showErrorSnack(context, '网站目录需为绝对路径');
       return;
     }
     if (setting.root.isEmpty || !setting.root.startsWith('/')) {
-      showSnack(context, '运行目录需为绝对路径', error: true);
+      showErrorSnack(context, '运行目录需为绝对路径');
       return;
     }
     if (setting.index.isEmpty) {
-      showSnack(context, '请至少保留一个默认文档', error: true);
+      showErrorSnack(context, '请至少保留一个默认文档');
       return;
     }
     if (setting.ssl &&
         (setting.sslCert.trim().isEmpty || setting.sslKey.trim().isEmpty)) {
-      showSnack(context, '开启 HTTPS 需要填写证书与私钥', error: true);
+      showErrorSnack(context, '开启 HTTPS 需要填写证书与私钥');
       return;
     }
 
@@ -218,7 +222,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
     try {
       await ref.read(websiteRepoProvider).updateSetting(setting);
       if (!mounted) return;
-      showSnack(context, '配置已保存');
+      showSuccessSnack(context, '配置已保存');
       ref.invalidate(websiteListProvider);
       await _load();
     } catch (e) {
@@ -229,6 +233,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
   }
 
   Future<void> _resetConfig() async {
+    if (_resetBusy) return;
     final ok = await showConfirmDialog(
       context,
       title: '重置配置',
@@ -237,24 +242,40 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       danger: true,
     );
     if (!ok) return;
+    setState(() => _resetBusy = true);
     try {
       await ref.read(websiteRepoProvider).resetConfig(widget.websiteId);
       if (!mounted) return;
-      showSnack(context, '配置已重置');
+      showSuccessSnack(context, '配置已重置');
       ref.invalidate(websiteListProvider);
       await _load();
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _resetBusy = false);
     }
   }
 
   Future<void> _toggleStatus(bool value) async {
+    if (_statusBusy) return;
+    // 停用会让线上站点立刻返回停止页，误触代价高；启用无破坏性，不打断。
+    if (!value) {
+      final name = _setting?.name ?? _row?.name ?? '该网站';
+      final ok = await showConfirmDialog(
+        context,
+        title: '停用网站',
+        content: '停用后访问「$name」将返回停止页，直到重新启用。确定停用吗？',
+        confirmText: '停用',
+        danger: true,
+      );
+      if (!ok || !mounted) return;
+    }
     setState(() => _statusBusy = true);
     try {
       await ref.read(websiteRepoProvider).updateStatus(widget.websiteId, value);
       if (!mounted) return;
       setState(() => _row = _row?.copyWith(status: value));
-      showSnack(context, value ? '已启用网站' : '已停用网站');
+      showSuccessSnack(context, value ? '已启用网站' : '已停用网站');
       ref.invalidate(websiteListProvider);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -270,7 +291,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
           .read(websiteRepoProvider)
           .updateRemark(widget.websiteId, _remarkController.text.trim());
       if (!mounted) return;
-      showSnack(context, '备注已保存');
+      showSuccessSnack(context, '备注已保存');
       ref.invalidate(websiteListProvider);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -293,13 +314,15 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       context: context,
       initialTime: TimeOfDay.fromDateTime(current),
     );
-    if (!mounted) return;
+    // 取消时间选择视为放弃本次修改；此前会按 00:00 静默提交，
+    // 用户看到的到期时间会比预期早整整一天。
+    if (time == null || !mounted) return;
     final picked = DateTime(
       date.year,
       date.month,
       date.day,
-      time?.hour ?? 0,
-      time?.minute ?? 0,
+      time.hour,
+      time.minute,
     );
     await _updateExpireAt(formatExpireAtPayload(picked));
   }
@@ -311,7 +334,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
           .read(websiteRepoProvider)
           .updateExpireAt(widget.websiteId, payload);
       if (!mounted) return;
-      showSnack(context, payload.isEmpty ? '已设为不限时' : '到期时间已更新');
+      showSuccessSnack(context, payload.isEmpty ? '已设为不限时' : '到期时间已更新');
       ref.invalidate(websiteListProvider);
       final row = await ref.read(websiteRepoProvider).findRow(widget.websiteId);
       if (!mounted) return;
@@ -334,7 +357,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
     final cert = _sslCertController.text.trim();
     final key = _sslKeyController.text.trim();
     if (cert.isEmpty || key.isEmpty) {
-      showSnack(context, '请先填写证书与私钥内容', error: true);
+      showErrorSnack(context, '请先填写证书与私钥内容');
       return;
     }
 
@@ -356,7 +379,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
             key: key,
           );
       if (!mounted) return;
-      showSnack(context, '证书已更新');
+      showSuccessSnack(context, '证书已更新');
       ref.invalidate(websiteCertListProvider);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -381,10 +404,9 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       }
       if (!mounted) return;
       if (dnsList.isEmpty) {
-        showSnack(
+        showErrorSnack(
           context,
           '网站包含泛域名，需要 DNS 验证，请先在证书管理中添加 DNS 账号',
-          error: true,
         );
         return;
       }
@@ -410,13 +432,13 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
 
     if (!mounted) return;
     setState(() => _obtainBusy = true);
-    showSnack(context, '正在签发证书，请稍候…');
+    showInfoSnack(context, '正在签发证书，请稍候…');
     try {
       await ref
           .read(websiteRepoProvider)
           .obtainCert(widget.websiteId, dnsId: dnsId);
       if (!mounted) return;
-      showSnack(context, '证书签发成功');
+      showSuccessSnack(context, '证书签发成功');
       ref.invalidate(websiteListProvider);
       ref.invalidate(websiteCertListProvider);
       await _load();
@@ -428,9 +450,11 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
   }
 
   Future<void> _delete() async {
+    if (_deleteBusy) return;
     final name = _setting?.name ?? _row?.name ?? '该网站';
     final options = await showDeleteWebsiteDialog(context, websiteName: name);
     if (options == null) return;
+    setState(() => _deleteBusy = true);
     try {
       await ref.read(websiteRepoProvider).delete(
             widget.websiteId,
@@ -438,7 +462,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
             deleteDb: options.deleteDb,
           );
       if (!mounted) return;
-      showSnack(context, '已删除网站 $name');
+      showSuccessSnack(context, '已删除网站 $name');
       ref.invalidate(websiteListProvider);
       if (context.canPop()) {
         context.pop(true);
@@ -447,6 +471,8 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       }
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _deleteBusy = false);
     }
   }
 
@@ -456,7 +482,8 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
       context,
       title: '放弃修改',
       content: '当前配置尚未保存，返回后修改将丢失。确定放弃吗？',
-      confirmText: '放弃',
+      confirmText: '放弃修改',
+      cancelText: '继续编辑',
       danger: true,
     );
   }
@@ -509,9 +536,15 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(setting.name),
+                Text(
+                  setting.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 Text(
                   '${_typeLabel(setting.type)}${_dirty ? ' · 有未保存的修改' : ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: _dirty
                             ? Theme.of(context).colorScheme.error
@@ -521,8 +554,8 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
               ],
             ),
             actions: [
-              IconButton(
-                tooltip: '访问统计',
+              A11yIconButton(
+                tooltip: '查看访问统计',
                 onPressed: () => context.push(
                   '/websites/${widget.websiteId}/stats',
                   extra: setting.name,
@@ -530,7 +563,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
                 icon: const Icon(Icons.bar_chart),
               ),
               PopupMenuButton<String>(
-                tooltip: '更多',
+                tooltip: '网站配置的更多操作',
                 onSelected: (value) {
                   switch (value) {
                     case 'reload':
@@ -776,6 +809,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
                   initialValue: env.php.any((e) => e.value == setting.php)
                       ? setting.php
                       : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'PHP 版本'),
                   items: [
                     for (final option in env.php)
@@ -966,7 +1000,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
               certsAsync.when(
                 loading: () => const LinearProgressIndicator(),
                 error: (e, _) => Text(
-                  '证书列表加载失败：${errorMessage(e)}',
+                  '证书列表加载失败：${describeError(e)}',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.error),
                 ),
@@ -1011,7 +1045,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
                         _sslKeyController.text = cert.key;
                       });
                       _markDirty();
-                      showSnack(context, '已填入证书内容，保存后生效');
+                      showInfoSnack(context, '已填入证书内容，保存后生效');
                     },
                   );
                 },
@@ -1116,7 +1150,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
         child: rewritesAsync.when(
           loading: () => const LinearProgressIndicator(),
           error: (e, _) => Text(
-            '模板加载失败：${errorMessage(e)}',
+            '模板加载失败：${describeError(e)}',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.error),
           ),
@@ -1384,6 +1418,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
                 initialValue: _realIpHeaders.contains(setting.realIp!.header)
                     ? setting.realIp!.header
                     : 'X-Forwarded-For',
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: '真实 IP 请求头'),
                 items: [
                   for (final header in _realIpHeaders)
@@ -1521,14 +1556,28 @@ class _NumberFieldState extends State<_NumberField> {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
+    return TextFormField(
       controller: _controller,
       keyboardType: TextInputType.number,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
         labelText: widget.label,
         helperText: widget.helperText,
       ),
-      onChanged: (v) => widget.onChanged(int.tryParse(v.trim()) ?? 0),
+      validator: (value) {
+        final v = (value ?? '').trim();
+        if (v.isEmpty) return null;
+        final n = int.tryParse(v);
+        if (n == null || n < 0) return '请输入非负整数，0 表示不限制';
+        return null;
+      },
+      onChanged: (v) {
+        final t = v.trim();
+        final n = t.isEmpty ? 0 : int.tryParse(t);
+        // 非法输入不写回模型（原实现会静默变成 0，等于悄悄取消了限制），
+        // 由 validator 在输入框下方提示用户修正。
+        if (n != null && n >= 0) widget.onChanged(n);
+      },
     );
   }
 }

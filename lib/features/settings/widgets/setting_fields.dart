@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/app_snack.dart';
+
 /// 表单文本输入项（带标题与可选说明）。
 class SettingTextField extends StatelessWidget {
   const SettingTextField({
@@ -172,6 +174,8 @@ class _StringListFieldState extends State<StringListField> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     if (widget.values.contains(text)) {
+      // 静默清空输入框会让用户以为没添加成功，明确说明重复。
+      showInfoSnack(context, '「$text」已在${widget.label}列表中');
       _controller.clear();
       return;
     }
@@ -213,7 +217,11 @@ class _StringListFieldState extends State<StringListField> {
                 child: IconButton.filledTonal(
                   onPressed: _add,
                   icon: const Icon(Icons.add),
-                  tooltip: '添加',
+                  tooltip: '添加到${widget.label}列表',
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
                 ),
               ),
             ],
@@ -226,9 +234,18 @@ class _StringListFieldState extends State<StringListField> {
               children: widget.values
                   .map(
                     (v) => Chip(
-                      label: Text(v),
+                      // 绑定 UA 之类的值可能很长，限宽省略避免撑破布局。
+                      label: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 220),
+                        child: Text(
+                          v,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       labelStyle: theme.textTheme.bodySmall,
                       onDeleted: () => _remove(v),
+                      deleteButtonTooltipMessage: '移除 $v',
                       visualDensity: VisualDensity.compact,
                     ),
                   )
@@ -278,6 +295,8 @@ class InfoRow extends StatelessWidget {
           Expanded(
             child: Text(
               text,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(color: valueColor),
             ),
           ),
@@ -296,9 +315,7 @@ class InfoRow extends StatelessWidget {
       onTap: () async {
         await Clipboard.setData(ClipboardData(text: value));
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已复制$label')),
-        );
+        showSuccessSnack(context, '已复制$label');
       },
       child: content,
     );

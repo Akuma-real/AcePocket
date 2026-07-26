@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/container.dart';
 import '../models/json_utils.dart';
 import 'container_actions.dart';
@@ -75,14 +76,15 @@ class ContainerTile extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: '实时日志',
+                  // 紧凑密度会把触摸目标压到 40dp 以下，A11yIconButton 兜底 48。
+                  A11yIconButton(
+                    tooltip: '查看 ${item.displayName} 的实时日志',
                     icon: const Icon(Icons.subject_outlined),
                     visualDensity: VisualDensity.compact,
                     onPressed: onShowLogs,
                   ),
                   PopupMenuButton<ContainerAction>(
-                    tooltip: '更多操作',
+                    tooltip: '${item.displayName} 的更多操作',
                     icon: const Icon(Icons.more_vert),
                     onSelected: onAction,
                     itemBuilder: (context) => [

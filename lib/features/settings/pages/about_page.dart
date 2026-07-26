@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -42,8 +44,8 @@ class AboutPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('关于'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新面板与系统信息',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(aboutInfoProvider),
           ),
@@ -242,13 +244,9 @@ class _UpdateSectionState extends ConsumerState<_UpdateSection> {
         case UpdateCheckStatus.updateAvailable:
           await showAppUpdateDialog(context, result.release!);
         case UpdateCheckStatus.upToDate:
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已是最新版本')),
-          );
+          showSuccessSnack(context, '已是最新版本');
         case UpdateCheckStatus.failed:
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('检查更新失败，请检查网络后重试')),
-          );
+          showErrorSnack(context, '检查更新失败，请检查网络后重试');
       }
     } finally {
       if (mounted) setState(() => _checking = false);
@@ -399,9 +397,7 @@ class _LinkRow extends StatelessWidget {
       onTap: () async {
         await Clipboard.setData(ClipboardData(text: url));
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已复制 $label 链接：$url')),
-        );
+        showSuccessSnack(context, '已复制$label链接');
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -420,6 +416,8 @@ class _LinkRow extends StatelessWidget {
             Expanded(
               child: Text(
                 url,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.primary,
                 ),

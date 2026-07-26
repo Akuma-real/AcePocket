@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/api/ws_client.dart';
 import '../../../core/storage/server_store.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/error_view.dart';
 import '../widgets/feedback.dart';
 import '../widgets/format.dart';
@@ -150,7 +151,7 @@ class _CronRunPageState extends ConsumerState<CronRunPage> {
   void _stop() {
     _closeChannel();
     setState(() => _status = _RunStatus.finished);
-    showSnack(context, '已断开连接（服务端命令可能仍在运行）');
+    showInfoSnack(context, '已断开连接（服务端命令可能仍在运行）');
   }
 
   Future<void> _showWsAuthDialog(String message) async {
@@ -172,7 +173,7 @@ class _CronRunPageState extends ConsumerState<CronRunPage> {
 
   Future<void> _copyAll() async {
     await Clipboard.setData(ClipboardData(text: _lines.join('\n')));
-    if (mounted) showSnack(context, '输出已复制到剪贴板');
+    if (mounted) showSuccessSnack(context, '输出已复制到剪贴板');
   }
 
   @override
@@ -200,13 +201,13 @@ class _CronRunPageState extends ConsumerState<CronRunPage> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '复制输出',
+          A11yIconButton(
+            tooltip: '复制全部输出',
             icon: const Icon(Icons.copy_all_outlined),
             onPressed: _lines.isEmpty ? null : _copyAll,
           ),
-          IconButton(
-            tooltip: running ? '断开' : '重新执行',
+          A11yIconButton(
+            tooltip: running ? '断开连接' : '重新执行任务',
             icon: Icon(running ? Icons.stop_circle_outlined : Icons.refresh),
             onPressed: server == null ? null : (running ? _stop : _start),
           ),
@@ -222,6 +223,21 @@ class _CronRunPageState extends ConsumerState<CronRunPage> {
                     child: ErrorView(
                       error: _error ?? '执行失败',
                       onRetry: _start,
+                    ),
+                  )
+                else if (_lines.isEmpty)
+                  Expanded(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          running ? '正在等待命令输出…' : '本次执行没有任何输出',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                     ),
                   )
                 else

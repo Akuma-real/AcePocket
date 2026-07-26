@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -107,8 +108,11 @@ class _PagedStatListState<T> extends State<PagedStatList<T>> {
                     child: Column(
                       children: [
                         Text(
-                          state.loadMoreError!,
+                          '加载更多失败：'
+                          '${describeError(state.loadMoreError!)}',
                           textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: theme.colorScheme.error),
                         ),
@@ -116,7 +120,7 @@ class _PagedStatListState<T> extends State<PagedStatList<T>> {
                         TextButton.icon(
                           onPressed: widget.onLoadMore,
                           icon: const Icon(Icons.refresh),
-                          label: const Text('重试'),
+                          label: const Text('重新加载'),
                         ),
                       ],
                     ),

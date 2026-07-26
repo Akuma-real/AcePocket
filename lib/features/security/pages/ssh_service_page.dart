@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -42,10 +45,10 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
         ref.invalidate(serviceStatusProvider(serviceForStatus));
       }
       if (!mounted) return;
-      if (successMessage != null) showSnack(context, successMessage);
+      if (successMessage != null) showSuccessSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -59,8 +62,8 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
       appBar: AppBar(
         title: const Text('SSH 服务'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新 SSH 配置',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(sshInfoProvider);
@@ -124,7 +127,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
           confirmText: '停止',
           danger: true,
         );
-        if (!confirmed) return;
+        if (!confirmed || !mounted) return;
       }
       await _run(
         'service',
@@ -144,7 +147,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
         content: '重启期间新的 SSH 连接会短暂不可用。',
         confirmText: '重启',
       );
-      if (!confirmed) return;
+      if (!confirmed || !mounted) return;
       await _run(
         'restart',
         () => repo.restartService(info.service),
@@ -173,8 +176,13 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
             error: (error, _) => ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('SSH 服务'),
-              subtitle: Text(errorMessage(error)),
-              trailing: IconButton(
+              subtitle: Text(
+                describeError(error),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: A11yIconButton(
+                tooltip: '重新获取 SSH 服务状态',
                 icon: const Icon(Icons.refresh),
                 onPressed: () =>
                     ref.invalidate(serviceStatusProvider(info.service)),
@@ -242,7 +250,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                 confirmText: '修改',
                 danger: true,
               );
-              if (!confirmed) return;
+              if (!confirmed || !mounted) return;
               await _run(
                 'port',
                 () => repo.updateSshPort(port),
@@ -264,7 +272,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                   confirmText: '关闭',
                   danger: true,
                 );
-                if (!confirmed) return;
+                if (!confirmed || !mounted) return;
               }
               await _run(
                 'password_auth',
@@ -287,7 +295,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                   confirmText: '关闭',
                   danger: true,
                 );
-                if (!confirmed) return;
+                if (!confirmed || !mounted) return;
               }
               await _run(
                 'pubkey_auth',
@@ -319,7 +327,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                   confirmText: '仍然允许',
                   danger: true,
                 );
-                if (!confirmed) return;
+                if (!confirmed || !mounted) return;
               }
               await _run(
                 'root_login',
@@ -365,7 +373,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                       helperText: '建议使用大小写字母、数字与符号组合',
                       confirmText: '修改',
                     );
-                    if (password == null) return;
+                    if (password == null || !mounted) return;
                     await _run(
                       'root_password',
                       () => repo.updateRootPassword(password),
@@ -401,7 +409,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                       );
                     } catch (e) {
                       if (!mounted) return;
-                      showSnack(context, errorMessage(e), error: true);
+                      showErrorSnack(context, e);
                     } finally {
                       if (mounted) setState(() => _busy = null);
                     }
@@ -430,7 +438,7 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                       confirmText: '生成',
                       danger: true,
                     );
-                    if (!confirmed) return;
+                    if (!confirmed || !mounted) return;
                     setState(() => _busy = 'generate_key');
                     try {
                       final key = await repo.generateRootKey();
@@ -442,10 +450,10 @@ class _SshServicePageState extends ConsumerState<SshServicePage> {
                         emptyMessage: '密钥已生成，但未能读取私钥内容',
                       );
                       if (!mounted) return;
-                      showSnack(context, '密钥对已生成，请妥善保存私钥');
+                      showSuccessSnack(context, '密钥对已生成，请妥善保存私钥');
                     } catch (e) {
                       if (!mounted) return;
-                      showSnack(context, errorMessage(e), error: true);
+                      showErrorSnack(context, e);
                     } finally {
                       if (mounted) setState(() => _busy = null);
                     }

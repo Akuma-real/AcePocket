@@ -1,33 +1,16 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/app_snack.dart';
 
-/// 把任意异常转成可直接展示给用户的文案。
-String describeError(Object error) {
-  if (error is ApiException) return error.message;
-  return error.toString().replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-}
+// 错误文案统一走 core 的 describeError（ApiException 取面板 msg，其余异常去掉
+// `XxxException: ` 前缀）。本文件曾复制过一份同名实现，现改为转出，避免两处规则漂移。
+export '../../../core/api/api_exception.dart' show describeError;
 
-/// 顶部消息提示。
-void showMessage(BuildContext context, String text, {bool error = false}) {
-  final scheme = Theme.of(context).colorScheme;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          text,
-          style: TextStyle(
-            color: error ? scheme.onErrorContainer : scheme.onInverseSurface,
-          ),
-        ),
-        backgroundColor: error ? scheme.errorContainer : scheme.inverseSurface,
-        duration: Duration(seconds: error ? 4 : 2),
-      ),
-    );
-}
-
-/// 执行一个会失败的异步操作，成功提示 [success]，失败提示错误信息。
+/// 执行一个可能失败的异步操作，成功提示 [success]，失败展示错误信息。
+///
+/// 提示统一使用 `core/widgets/app_snack.dart`：成功用 `inverseSurface` 组配色，
+/// 失败用 `errorContainer` / `onErrorContainer` 成对配色并带关闭按钮，
+/// 面板返回的超长 msg 会被截断为 4 行而不是撑满半屏。
 ///
 /// 返回 true 表示成功。
 Future<bool> runGuarded(
@@ -37,10 +20,11 @@ Future<bool> runGuarded(
 }) async {
   try {
     await action();
-    if (context.mounted) showMessage(context, success);
+    if (context.mounted) showSuccessSnack(context, success);
     return true;
   } catch (error) {
-    if (context.mounted) showMessage(context, describeError(error), error: true);
+    // 直接把异常对象交给 showErrorSnack：ApiException 会取面板返回的 msg。
+    if (context.mounted) showErrorSnack(context, error);
     return false;
   }
 }

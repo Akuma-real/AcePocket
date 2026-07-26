@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -11,7 +14,6 @@ import '../models/firewall_models.dart';
 import '../models/firewall_transfer.dart';
 import '../providers/security_providers.dart';
 import '../repo/export_file_store.dart';
-import '../widgets/security_dialogs.dart';
 import '../widgets/security_tiles.dart';
 
 /// 防火墙端口规则导出页 `/firewall/export`。
@@ -35,7 +37,7 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
   Future<void> _copyCsv(String csv) async {
     await Clipboard.setData(ClipboardData(text: csv));
     if (!mounted) return;
-    showSnack(context, '导出内容已复制到剪贴板');
+    showSuccessSnack(context, '导出内容已复制到剪贴板');
   }
 
   Future<void> _saveCsv(String csv) async {
@@ -49,7 +51,7 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
       _showSavedSnack(saved);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, '保存失败：${errorMessage(e)}', error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _savingCsv = false);
     }
@@ -61,7 +63,7 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
       final bytes = await ref.read(securityRepoProvider).exportFirewallRules();
       if (bytes.isEmpty) {
         if (!mounted) return;
-        showSnack(context, '面板返回的导出文件为空', error: true);
+        showErrorSnack(context, const ApiException('面板返回的导出文件为空'));
         return;
       }
       final saved =
@@ -70,7 +72,7 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
       _showSavedSnack(saved);
     } catch (e) {
       if (!mounted) return;
-      showSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -80,8 +82,13 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
+      // 这条保留原生 SnackBar：需要「打开」动作按钮，core 的 app_snack 不带 action。
       SnackBar(
-        content: Text('已保存到 ${saved.path}'),
+        content: Text(
+          '已保存到 ${saved.path}',
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        ),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 6),
         action: SnackBarAction(
@@ -89,7 +96,7 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
           onPressed: () async {
             final failure = await openSavedFile(saved.path);
             if (!mounted || failure == null) return;
-            showSnack(context, failure, error: true);
+            showErrorSnack(context, ApiException(failure));
           },
         ),
       ),
@@ -112,8 +119,8 @@ class _FirewallExportPageState extends ConsumerState<FirewallExportPage> {
       appBar: AppBar(
         title: const Text('导出端口规则'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新端口规则',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(firewallExportRulesProvider),
           ),

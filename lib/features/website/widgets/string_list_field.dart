@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
+
 /// 可增删的字符串列表编辑器（域名、默认文档、TLS 协议、真实 IP 来源等）。
 ///
 /// 内部维护 [TextEditingController]，任何变更都会通过 [onChanged] 回传完整列表；
@@ -129,8 +131,8 @@ class _StringListFieldState extends State<StringListField> {
                     onChanged: (_) => _emit(),
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除',
+                A11yIconButton(
+                  tooltip: '删除第 ${i + 1} 条${widget.label}',
                   onPressed: _controllers.length <= widget.minItems
                       ? null
                       : () => _removeAt(i),

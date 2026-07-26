@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/format.dart';
 import '../../../core/widgets/section_card.dart';
-import '../models/db_types.dart';
 import '../models/redis_kv.dart';
 import 'db_chips.dart';
 
@@ -45,7 +45,7 @@ class RedisKeyTile extends StatelessWidget {
                 const SizedBox(height: 6),
                 ChipRow(
                   children: [
-                    InfoChip(label: kv.type.isEmpty ? 'unknown' : kv.type),
+                    InfoChip(label: kv.type.isEmpty ? '类型未知' : kv.type),
                     InfoChip(
                       label: kv.ttlText,
                       icon: Icons.timer_outlined,

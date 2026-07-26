@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -68,10 +71,10 @@ class _PhpEnvironmentPageState extends ConsumerState<PhpEnvironmentPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('PHP ${_versionText(widget.version)}'),
+        title: Text('PHP ${phpVersionText(widget.version)}'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新 PHP 环境信息',
             icon: const Icon(Icons.refresh),
             onPressed: _refreshAll,
           ),
@@ -98,15 +101,6 @@ class _PhpEnvironmentPageState extends ConsumerState<PhpEnvironmentPage>
   }
 }
 
-/// `83` → `8.3`；无法拆分时原样返回。
-String _versionText(int version) {
-  final raw = '$version';
-  if (raw.length >= 2) {
-    return '${raw.substring(0, raw.length - 1)}.${raw.substring(raw.length - 1)}';
-  }
-  return raw;
-}
-
 // -------------------------------------------------------------------- 顶部菜单
 
 class _PhpMenuButton extends ConsumerWidget {
@@ -121,11 +115,11 @@ class _PhpMenuButton extends ConsumerWidget {
 
     Future<void> handle(String value) async {
       final repo = ref.read(environmentRepoProvider);
-      final name = env?.name ?? 'PHP ${_versionText(version)}';
+      final name = env?.name ?? 'PHP ${phpVersionText(version)}';
       switch (value) {
         case 'check':
           ref.invalidate(environmentInstalledProvider(key));
-          showEnvSnack(context, '正在重新检测…');
+          showInfoSnack(context, '正在重新检测安装状态…');
         case 'install':
           final ok = await showConfirmDialog(
             context,
@@ -143,7 +137,7 @@ class _PhpMenuButton extends ConsumerWidget {
             showTaskSubmittedSnack(context, '已提交安装任务：$name');
           } catch (e) {
             if (!context.mounted) return;
-            showEnvSnack(context, errorMessage(e), error: true);
+            showErrorSnack(context, e);
           }
         case 'update':
           final ok = await showConfirmDialog(
@@ -161,7 +155,7 @@ class _PhpMenuButton extends ConsumerWidget {
             showTaskSubmittedSnack(context, '已提交更新任务：$name');
           } catch (e) {
             if (!context.mounted) return;
-            showEnvSnack(context, errorMessage(e), error: true);
+            showErrorSnack(context, e);
           }
         case 'uninstall':
           final ok = await showConfirmDialog(
@@ -182,7 +176,7 @@ class _PhpMenuButton extends ConsumerWidget {
             showTaskSubmittedSnack(context, '已提交卸载任务：$name');
           } catch (e) {
             if (!context.mounted) return;
-            showEnvSnack(context, errorMessage(e), error: true);
+            showErrorSnack(context, e);
           }
       }
     }
@@ -228,10 +222,10 @@ class _PhpOverviewTabState extends ConsumerState<_PhpOverviewTab> {
     try {
       await action();
       if (!mounted) return;
-      showEnvSnack(context, successMessage);
+      showSuccessSnack(context, successMessage);
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -286,7 +280,7 @@ class _PhpOverviewTabState extends ConsumerState<_PhpOverviewTab> {
         children: [
           KeyValueRow(
             label: '名称',
-            value: env?.name ?? 'PHP ${_versionText(widget.version)}',
+            value: env?.name ?? 'PHP ${phpVersionText(widget.version)}',
           ),
           KeyValueRow(
             label: '版本标识',
@@ -524,7 +518,7 @@ class _LogPathRow extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              '$label：${errorMessage(error)}',
+              '$label：${describeError(error)}',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             ),
@@ -596,6 +590,8 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
   }
 
   Future<void> _toggle(PhpModule module) async {
+    // 同一时刻只允许一个扩展在途：否则连点多个「安装」会连发多条后台任务。
+    if (_busySlug != null) return;
     final ok = await showConfirmDialog(
       context,
       title: module.installed ? '卸载扩展 ${module.name}？' : '安装扩展 ${module.name}？',
@@ -621,7 +617,7 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
       );
     } catch (e) {
       if (!mounted) return;
-      showEnvSnack(context, errorMessage(e), error: true);
+      showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busySlug = null);
     }
@@ -643,7 +639,8 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
               prefixIcon: const Icon(Icons.search, size: 20),
               suffixIcon: _query.isEmpty
                   ? null
-                  : IconButton(
+                  : A11yIconButton(
+                      tooltip: '清空搜索关键字',
                       icon: const Icon(Icons.close, size: 18),
                       onPressed: () {
                         _searchController.clear();
@@ -714,11 +711,20 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
   Widget _moduleTile(PhpModule module) {
     final theme = Theme.of(context);
     final busy = _busySlug == module.slug;
+    // 别的扩展在途时禁用本行按钮，避免并发提交多条后台任务。
+    final locked = _busySlug != null;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       title: Row(
         children: [
-          Flexible(child: Text(module.name, style: theme.textTheme.titleSmall)),
+          Flexible(
+            child: Text(
+              module.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall,
+            ),
+          ),
           const SizedBox(width: 8),
           if (module.installed)
             StatusChip(
@@ -732,6 +738,8 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           module.description.isEmpty ? module.slug : module.description,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -744,7 +752,7 @@ class _PhpModulesTabState extends ConsumerState<_PhpModulesTab> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : TextButton(
-              onPressed: () => _toggle(module),
+              onPressed: locked ? null : () => _toggle(module),
               style: module.installed
                   ? TextButton.styleFrom(
                       foregroundColor: theme.colorScheme.error)
@@ -798,14 +806,36 @@ class _PhpLoadTab extends ConsumerWidget {
                     const Divider(height: 1, indent: 16, endIndent: 16),
                 itemBuilder: (context, index) {
                   final item = items[index];
-                  return ListTile(
-                    dense: true,
-                    title: Text(item.name),
-                    trailing: Text(
-                      formatLoadValue(item.name, item.value),
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontFamily: 'monospace',
+                  final theme = Theme.of(context);
+                  // 不用 ListTile 的 trailing：trailing 不参与弹性布局，
+                  // 遇到「上次启动时间」这类被格式化成长文本的值会直接溢出。
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            formatLoadValue(item.name, item.value),
+                            textAlign: TextAlign.end,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 },

@@ -111,6 +111,8 @@ class _TextUploadDialogState extends State<_TextUploadDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
+      // 键盘弹出时内容区高度受限，允许滚动避免溢出。
+      scrollable: true,
       title: const Text('上传文本文件'),
       content: SizedBox(
         width: 480,
@@ -230,6 +232,7 @@ class _RemoteDownloadDialogState extends State<_RemoteDownloadDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
+      scrollable: true,
       title: const Text('远程下载'),
       content: SizedBox(
         width: 480,

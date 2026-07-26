@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/app_item.dart';
 
 /// 选择要安装的版本通道。
@@ -114,8 +115,8 @@ class _ChannelTile extends StatelessWidget {
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  tooltip: '更新日志',
+                A11yIconButton(
+                  tooltip: '查看该版本的更新日志',
                   icon: const Icon(Icons.article_outlined),
                   onPressed: () => _showLog(context),
                 ),

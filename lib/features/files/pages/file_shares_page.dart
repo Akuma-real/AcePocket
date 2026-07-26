@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -29,16 +30,15 @@ class FileSharesPage extends ConsumerStatefulWidget {
 class _FileSharesPageState extends ConsumerState<FileSharesPage> {
   bool _busy = false;
 
-  void _snack(String message, {bool error = false}) {
+  /// 错误提示统一走 core 的 [showErrorSnack]（成对配色，深浅主题下都能看清）。
+  void _error(Object error) {
     if (!mounted) return;
-    final theme = Theme.of(context);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: error ? theme.colorScheme.errorContainer : null,
-        showCloseIcon: error,
-      ));
+    showErrorSnack(context, error);
+  }
+
+  void _success(String message) {
+    if (!mounted) return;
+    showSuccessSnack(context, message);
   }
 
   Future<void> _refresh() async {
@@ -68,8 +68,7 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
       final url = ref.read(fileRepoProvider).shareDownloadUrl(share);
       await showShareLinkDialog(context, url: url);
     } catch (e) {
-      // describeError：非 ApiException 时避免露出原始英文异常。
-      _snack(describeError(e), error: true);
+      _error(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -79,18 +78,19 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
     final ok = await showConfirmDialog(
       context,
       title: '取消分享',
-      content: '确定要取消「${share.path}」的分享吗？\n取消后该链接立即失效。',
-      confirmText: '取消分享',
+      content: '确定要取消「${share.path}」的分享吗？\n该链接会立即失效，且无法恢复。',
+      // 两个按钮都写「取消」会让人分不清哪个是执行、哪个是退出。
+      confirmText: '确认取消分享',
+      cancelText: '保留分享',
       danger: true,
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
       await ref.read(fileSharesProvider.notifier).remove(share.id);
-      _snack('分享已取消');
+      _success('分享已取消，链接已失效');
     } catch (e) {
-      // describeError：非 ApiException 时避免露出原始英文异常。
-      _snack(describeError(e), error: true);
+      _error(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -99,7 +99,7 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
   Future<void> _copyLink(FileShare share) async {
     final url = ref.read(fileRepoProvider).shareDownloadUrl(share);
     await Clipboard.setData(ClipboardData(text: url));
-    _snack('链接已复制到剪贴板');
+    _success('下载链接已复制到剪贴板');
   }
 
   Widget _buildTile(FileShare share) {
@@ -151,15 +151,19 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
             const SizedBox(height: 6),
             SelectableText(
               url,
+              // 分享链接可能很长（含访问入口），限制为 3 行避免单条卡片撑满整屏。
+              maxLines: 3,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              '下载 ${share.downloads}'
-              '${share.maxDownloads > 0 ? ' / ${share.maxDownloads}' : '（不限次数）'}'
-              ' · 到期 ${expiredAt == null ? '-' : formatter.format(expiredAt)}',
+              '已下载 ${share.downloads}'
+              '${share.maxDownloads > 0 ? ' / ${share.maxDownloads} 次' : ' 次（不限次数）'}'
+              ' · 到期时间 ${expiredAt == null ? '未设置' : formatter.format(expiredAt)}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -196,10 +200,10 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
       appBar: AppBar(
         title: const Text('文件分享'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新分享列表',
             icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
+            onPressed: _busy ? null : _refresh,
           ),
         ],
         bottom: _busy
@@ -230,10 +234,11 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
                   SizedBox(
                     height: 360,
                     child: EmptyView(
-                      message: '还没有创建任何分享链接',
+                      message: '还没有创建任何分享链接\n'
+                          '分享链接无需登录即可下载指定文件，可设置有效期与下载次数',
                       icon: Icons.link_off,
                       action: FilledButton.icon(
-                        onPressed: _create,
+                        onPressed: _busy ? null : _create,
                         icon: const Icon(Icons.add_link),
                         label: const Text('新建分享'),
                       ),

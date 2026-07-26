@@ -30,7 +30,7 @@ class CountInfoCard extends ConsumerWidget {
           ),
         ),
         error: (error, _) => InlineError(
-          message: error is ApiException ? error.message : '$error',
+          message: describeError(error),
           onRetry: () => ref.invalidate(countInfoProvider),
         ),
         data: (info) => Row(

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -60,6 +62,15 @@ class _ElasticsearchPageState extends ConsumerState<ElasticsearchPage> {
     });
   }
 
+  /// 系统返回（手势 / 返回键）：处在文档列表时先退回索引列表，而不是整页出栈。
+  ///
+  /// 本页把「索引列表 → 文档列表」做成了同一路由内的两层视图，没有拦截的话
+  /// Android 手势返回会直接销毁整页，服务器选择、索引、搜索词一并丢失。
+  void _handlePop(bool didPop, Object? result) {
+    if (didPop) return;
+    _backToIndices();
+  }
+
   /// 重新拉取索引列表并等待结果（供下拉刷新使用）。
   Future<void> _refreshIndices(int serverId) async {
     ref.invalidate(esIndicesProvider(serverId));
@@ -86,7 +97,7 @@ class _ElasticsearchPageState extends ConsumerState<ElasticsearchPage> {
     );
     if (name == null || !mounted) return;
     if (name.isEmpty) {
-      showMessage(context, '请填写索引名', error: true);
+      showErrorSnack(context, '请填写索引名');
       return;
     }
 
@@ -194,37 +205,47 @@ class _ElasticsearchPageState extends ConsumerState<ElasticsearchPage> {
         ? EsDataQuery(serverId: serverId, index: index, search: _search)
         : null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(index == null ? 'Elasticsearch 管理' : '索引：$index'),
-        leading: index == null
-            ? null
-            : IconButton(
-                tooltip: '返回索引列表',
-                onPressed: _backToIndices,
-                icon: const Icon(Icons.arrow_back),
-              ),
-      ),
-      floatingActionButton: serverId == null
-          ? null
-          : (query == null
-              ? FloatingActionButton.extended(
-                  onPressed: () => _createIndex(serverId),
-                  icon: const Icon(Icons.add),
-                  label: const Text('创建索引'),
-                )
-              : FloatingActionButton.extended(
-                  onPressed: () => _createDocument(query),
-                  icon: const Icon(Icons.note_add_outlined),
-                  label: const Text('新建文档'),
-                )),
-      body: Column(
-        children: [
-          const FeatureUnsupportedBanner(feature: PanelFeature.elasticsearch),
-          Expanded(
-            child: _buildBody(context, serversAsync, servers, serverId, query),
+    // 处在文档列表（index != null）时禁止直接出栈，交给 _handlePop 回退内层视图。
+    return PopScope<Object?>(
+      canPop: index == null,
+      onPopInvokedWithResult: _handlePop,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            index == null ? 'Elasticsearch 管理' : '索引：$index',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ],
+          leading: index == null
+              ? null
+              : A11yIconButton(
+                  tooltip: '返回索引列表',
+                  // 走 maybePop 以复用上面的 PopScope，保证箭头与系统手势行为一致。
+                  onPressed: () => Navigator.maybePop(context),
+                  icon: const Icon(Icons.arrow_back),
+                ),
+        ),
+        floatingActionButton: serverId == null
+            ? null
+            : (query == null
+                ? FloatingActionButton.extended(
+                    onPressed: () => _createIndex(serverId),
+                    icon: const Icon(Icons.add),
+                    label: const Text('创建索引'),
+                  )
+                : FloatingActionButton.extended(
+                    onPressed: () => _createDocument(query),
+                    icon: const Icon(Icons.note_add_outlined),
+                    label: const Text('新建文档'),
+                  )),
+        body: Column(
+          children: [
+            const FeatureUnsupportedBanner(feature: PanelFeature.elasticsearch),
+            Expanded(
+              child: _buildBody(context, serversAsync, servers, serverId, query),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -285,18 +306,23 @@ class _ElasticsearchPageState extends ConsumerState<ElasticsearchPage> {
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
                     labelText: '搜索文档',
-                    hintText: '按关键字全文检索',
+                    hintText: '输入关键字后回车全文检索',
                     prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _search.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: '清除',
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _search = '');
-                            },
-                          ),
+                    // 监听输入框本身：只看已提交的 _search 会导致用户刚输入
+                    // 还没回车时看不到清除按钮。
+                    suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _searchController,
+                      builder: (context, value, _) => value.text.isEmpty
+                          ? const SizedBox.shrink()
+                          : A11yIconButton(
+                              tooltip: '清除搜索词',
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _search = '');
+                              },
+                            ),
+                    ),
                   ),
                   onSubmitted: (value) =>
                       setState(() => _search = value.trim()),

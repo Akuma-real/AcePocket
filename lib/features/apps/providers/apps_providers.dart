@@ -109,16 +109,26 @@ class AppListNotifier extends AutoDisposeFamilyNotifier<AppListState, bool> {
     return AppListState(isLoading: true);
   }
 
-  /// 下拉刷新 / 错误重试。
-  Future<void> refresh() async {
-    if (_repo == null) return;
+  /// 下拉刷新 / 错误重试；失败时返回错误对象供页面提示（成功返回 null）。
+  ///
+  /// 刷新失败**不会清空已加载的数据**：整页替换成错误页会一并丢掉滚动位置与
+  /// 已展开的条目，而下拉刷新失败大多只是一次网络抖动。仅在列表本来就为空
+  /// （首屏）时才写入 `state.error` 让页面展示错误页。
+  Future<Object?> refresh() async {
+    if (_repo == null) return null;
     final generation = ++_generation;
-    await _loadFirstPage(generation, silent: true);
+    return _loadFirstPage(generation, silent: true);
   }
 
-  Future<void> _loadFirstPage(int generation, {bool silent = false}) async {
+  /// 错误页「重试」：先展示首屏加载态再重新拉取，让点击有即时反馈。
+  Future<Object?> reload() async {
+    if (_repo == null) return null;
+    return _loadFirstPage(++_generation);
+  }
+
+  Future<Object?> _loadFirstPage(int generation, {bool silent = false}) async {
     final repo = _repo;
-    if (repo == null || _stale(generation)) return;
+    if (repo == null || _stale(generation)) return null;
     if (!silent) {
       _set(generation, state.copyWith(isLoading: true, clearError: true));
     }
@@ -139,11 +149,23 @@ class AppListNotifier extends AutoDisposeFamilyNotifier<AppListState, bool> {
           isLoading: false,
         ),
       );
+      return null;
     } catch (e) {
-      _set(
-        generation,
-        AppListState(isLoading: false, error: e),
-      );
+      if (_stale(generation)) return null;
+      if (state.items.isNotEmpty) {
+        // 已有数据：保留列表与滚动位置，错误交由调用方以提示条展示。
+        _set(
+          generation,
+          state.copyWith(
+            isLoading: false,
+            isLoadingMore: false,
+            clearError: true,
+          ),
+        );
+      } else {
+        _set(generation, AppListState(isLoading: false, error: e));
+      }
+      return e;
     }
   }
 

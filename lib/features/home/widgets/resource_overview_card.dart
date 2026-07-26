@@ -25,12 +25,17 @@ class ResourceOverviewCard extends StatelessWidget {
 
     return SectionCard(
       title: '实时负载',
-      trailing: Text(
-        updatedAt == null ? '' : '更新于 ${formatChartTimeOfDay(updatedAt!)}',
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
+      trailing: updatedAt == null
+          ? null
+          : Text(
+              '更新于 ${formatChartTimeOfDay(updatedAt!)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontFeatures: kTabularFigures,
+              ),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -144,6 +149,7 @@ class _Gauge extends StatelessWidget {
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: tint,
+                      fontFeatures: kTabularFigures,
                     ),
                   ),
                   Text(
@@ -186,7 +192,9 @@ class _SwapBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final percent = swap.usedPercent.clamp(0, 100).toDouble();
+    // NaN 通不过 clamp（两次比较都为 false，原样返回），会打挂进度条的断言。
+    final percent =
+        swap.usedPercent.isFinite ? swap.usedPercent.clamp(0.0, 100.0) : 0.0;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -211,14 +219,18 @@ class _SwapBar extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${formatBytes(swap.used)} / ${formatBytes(swap.total)}',
-                  style: theme.textTheme.bodySmall,
+                  maxLines: 1,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontFeatures: kTabularFigures),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 formatPercent(swap.usedPercent),
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
+                  fontFeatures: kTabularFigures,
                 ),
               ),
             ],

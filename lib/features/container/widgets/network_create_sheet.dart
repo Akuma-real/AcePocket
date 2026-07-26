@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/container_network.dart';
 import '../models/kv.dart';
 import '../providers/container_providers.dart';
@@ -110,9 +111,12 @@ class _NetworkCreateSheetState extends ConsumerState<_NetworkCreateSheet> {
                   Expanded(
                     child: Text('创建网络', style: theme.textTheme.titleMedium),
                   ),
-                  IconButton(
+                  A11yIconButton(
+                    tooltip: '关闭创建网络面板',
                     icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(false),
+                    onPressed: _submitting
+                        ? null
+                        : () => Navigator.of(context).pop(false),
                   ),
                 ],
               ),

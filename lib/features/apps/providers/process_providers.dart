@@ -75,15 +75,25 @@ class ProcessListNotifier extends AutoDisposeNotifier<ProcessListState> {
     return ProcessListState(isLoading: true);
   }
 
-  /// 下拉刷新 / 操作后刷新（不清空当前列表）。
-  Future<void> refresh() async {
-    if (_repo == null) return;
-    await _loadFirstPage(++_generation, silent: true);
+  /// 下拉刷新 / 操作后刷新（不清空当前列表）；
+  /// 失败时返回错误对象供页面提示（成功返回 null）。
+  ///
+  /// 刷新失败时保留已加载的进程，避免一次网络抖动就把整页换成错误页、
+  /// 连带丢失滚动位置；仅在列表本来就为空时才写入 `state.error`。
+  Future<Object?> refresh() async {
+    if (_repo == null) return null;
+    return _loadFirstPage(++_generation, silent: true);
   }
 
-  Future<void> _loadFirstPage(int generation, {bool silent = false}) async {
+  /// 错误页「重试」：先展示首屏加载态再重新拉取，让点击有即时反馈。
+  Future<Object?> reload() async {
+    if (_repo == null) return null;
+    return _loadFirstPage(++_generation);
+  }
+
+  Future<Object?> _loadFirstPage(int generation, {bool silent = false}) async {
     final repo = _repo;
-    if (repo == null || _stale(generation)) return;
+    if (repo == null || _stale(generation)) return null;
     if (!silent) {
       _set(generation, state.copyWith(isLoading: true, clearError: true));
     }
@@ -104,8 +114,22 @@ class ProcessListNotifier extends AutoDisposeNotifier<ProcessListState> {
           isLoading: false,
         ),
       );
+      return null;
     } catch (e) {
-      _set(generation, ProcessListState(isLoading: false, error: e));
+      if (_stale(generation)) return null;
+      if (state.items.isNotEmpty) {
+        _set(
+          generation,
+          state.copyWith(
+            isLoading: false,
+            isLoadingMore: false,
+            clearError: true,
+          ),
+        );
+      } else {
+        _set(generation, ProcessListState(isLoading: false, error: e));
+      }
+      return e;
     }
   }
 

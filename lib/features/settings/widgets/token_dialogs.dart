@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../models/user_token.dart';
 import 'format_utils.dart';
 import 'setting_fields.dart';
@@ -134,7 +136,7 @@ class _TokenEditorDialogState extends State<_TokenEditorDialog> {
               StringListField(
                 label: 'IP 白名单',
                 values: _ips,
-                hint: '如 1.2.3.4 或 10.0.0.0/8',
+                hint: '如 192.0.2.10 或 10.0.0.0/8',
                 helper: '留空表示不限制来源 IP，支持 CIDR',
                 onChanged: (v) => setState(() => _ips = v),
               ),
@@ -150,9 +152,7 @@ class _TokenEditorDialogState extends State<_TokenEditorDialog> {
         FilledButton(
           onPressed: () {
             if (!_expiredAt.isAfter(DateTime.now())) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('过期时间必须晚于当前时间')),
-              );
+              showErrorSnack(context, '过期时间必须晚于当前时间');
               return;
             }
             Navigator.of(context).pop(
@@ -242,9 +242,7 @@ Future<void> showTokenCreatedDialog(
                 ClipboardData(text: 'ID: ${token.id}\nToken: $secret'),
               );
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已复制令牌 ID 与令牌')),
-              );
+              showSuccessSnack(context, '已复制令牌 ID 与令牌');
             },
             child: const Text('复制全部'),
           ),
@@ -301,17 +299,15 @@ class _CopyableField extends StatelessWidget {
                 ),
               ),
             ),
-            IconButton(
-              tooltip: '复制',
+            A11yIconButton(
+              tooltip: '复制$label',
               icon: const Icon(Icons.copy_outlined, size: 18),
               onPressed: value.isEmpty
                   ? null
                   : () async {
                       await Clipboard.setData(ClipboardData(text: value));
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('已复制$label')),
-                      );
+                      showSuccessSnack(context, '已复制$label');
                     },
             ),
           ],

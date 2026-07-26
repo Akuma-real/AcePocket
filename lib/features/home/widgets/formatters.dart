@@ -1,29 +1,34 @@
 /// 仪表盘与监控模块通用的数值 / 时间格式化工具。
+///
+/// 字节体积、速率、百分比、时长统一复用 core 的唯一实现
+/// （`lib/core/utils/format.dart`），本文件只保留监控模块特有的
+/// 单位换算（MB / KB/s 序列）与时间格式化。
 library;
+
+import 'dart:ui' show FontFeature;
 
 import 'package:intl/intl.dart';
 
-const List<String> _byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+import '../../../core/utils/format.dart';
 
-/// 字节数转可读字符串，如 `1.23 GB`。
-String formatBytes(num bytes, {int decimals = 2}) {
-  var value = bytes.toDouble();
-  if (value.isNaN || value.isInfinite || value < 0) value = 0;
-  var index = 0;
-  while (value >= 1024 && index < _byteUnits.length - 1) {
-    value /= 1024;
-    index++;
-  }
-  return '${value.toStringAsFixed(index == 0 ? 0 : decimals)} ${_byteUnits[index]}';
-}
+export '../../../core/utils/format.dart'
+    show formatBytes, formatBytesRate, formatPercent;
+
+/// 等宽数字排版。
+///
+/// 首页实时数值每 3 秒刷新一次，默认的比例数字宽度逐位不同（`1` 比 `8` 窄），
+/// 数值一变，同一行里的相邻文字就会左右挪动，整屏看起来在「抖」。
+/// 所有会被实时刷新的数字都套这个 feature，让每位数字占同样宽度。
+const List<FontFeature> kTabularFigures = <FontFeature>[
+  FontFeature.tabularFigures(),
+];
 
 /// 速率（字节/秒）转可读字符串，如 `1.2 MB/s`。
-String formatRate(num bytesPerSecond) =>
-    '${formatBytes(bytesPerSecond, decimals: 1)}/s';
+String formatRate(num bytesPerSecond) => formatBytesRate(bytesPerSecond);
 
 /// 以 MB 为单位的数值转可读字符串（监控历史序列的单位为 MB）。
-String formatMegabytes(num megabytes, {int decimals = 2}) =>
-    formatBytes(megabytes * 1024 * 1024, decimals: decimals);
+String formatMegabytes(num megabytes, {int fractionDigits = 2}) =>
+    formatBytes(megabytes * 1024 * 1024, fractionDigits: fractionDigits);
 
 /// 以 KB/s 为单位的数值转可读速率（磁盘 IO 历史序列的单位为 KB/s）。
 String formatKilobytesRate(num kilobytesPerSecond) =>
@@ -33,23 +38,9 @@ String formatKilobytesRate(num kilobytesPerSecond) =>
 String formatMegabytesRate(num megabytesPerSecond) =>
     formatRate(megabytesPerSecond * 1024 * 1024);
 
-/// 百分比，如 `42.3%`。
-String formatPercent(num value, {int decimals = 1}) =>
-    '${value.toDouble().clamp(0, 100).toStringAsFixed(decimals)}%';
-
-/// 秒数转「x 天 x 小时 x 分钟」。
-String formatUptime(int seconds) {
-  if (seconds <= 0) return '—';
-  final days = seconds ~/ 86400;
-  final hours = (seconds % 86400) ~/ 3600;
-  final minutes = (seconds % 3600) ~/ 60;
-  final parts = <String>[];
-  if (days > 0) parts.add('$days 天');
-  if (hours > 0) parts.add('$hours 小时');
-  if (parts.length < 2 && minutes > 0) parts.add('$minutes 分钟');
-  if (parts.isEmpty) parts.add('$seconds 秒');
-  return parts.join(' ');
-}
+/// 运行时长（秒）转中文文本；面板取不到（≤ 0）时展示占位符。
+String formatUptime(int seconds) =>
+    seconds <= 0 ? '—' : formatDuration(Duration(seconds: seconds));
 
 /// 统计数量：面板取不到时返回 -1，展示为占位符。
 String formatCount(int value) => value < 0 ? '—' : '$value';
@@ -69,8 +60,7 @@ String formatDateTime(DateTime? time) =>
 /// unix 秒时间戳转完整时间（时间戳是绝对时刻，构造出的实例已是本地时区）。
 String formatUnixSeconds(int seconds) => seconds <= 0
     ? '—'
-    : _fullFormat.format(
-        DateTime.fromMillisecondsSinceEpoch(seconds * 1000));
+    : _fullFormat.format(DateTime.fromMillisecondsSinceEpoch(seconds * 1000));
 
 /// 解析监控接口返回的时间串。
 ///
@@ -87,7 +77,9 @@ DateTime? parseMonitorTime(String raw) {
 String formatChartTime(String raw, {required bool withDate}) {
   final time = parseMonitorTime(raw);
   if (time == null) return raw;
-  return withDate ? _dateTimeShortFormat.format(time) : _timeFormat.format(time);
+  return withDate
+      ? _dateTimeShortFormat.format(time)
+      : _timeFormat.format(time);
 }
 
 /// 图表提示气泡里的时间标签（始终带日期）。

@@ -131,8 +131,10 @@ class _CompressDialogState extends State<_CompressDialog> {
           children: [
             Text(
               multiple
-                  ? '共 ${widget.names.length} 项，压缩到 ${widget.dir}'
-                  : '${widget.names.first} → ${widget.dir}',
+                  ? '共 ${widget.names.length} 项，压缩包保存到 ${widget.dir}'
+                  : '压缩「${widget.names.first}」，压缩包保存到 ${widget.dir}',
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -240,13 +242,17 @@ class _UnCompressDialogState extends State<_UnCompressDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
+      // 路径长 / 键盘弹出时内容会超高，交给对话框自身滚动。
+      scrollable: true,
       title: const Text('解压'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            widget.archivePath,
+            '解压「${widget.archivePath}」',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

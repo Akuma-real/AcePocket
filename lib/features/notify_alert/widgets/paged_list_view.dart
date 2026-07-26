@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
-import '../models/paged.dart';
 
 /// 分页列表通用视图：下拉刷新 + 触底自动加载下一页 + 空态 / 错误态处理。
 ///
-/// 数据来自继承 `PagedListNotifier` 的 provider，[state] 直接传 `ref.watch(...)`。
+/// 数据来自继承 core `PagedAsyncNotifier` 的 provider，[state] 直接传
+/// `ref.watch(...)`。加载下一页失败不会清空已有数据，错误由列表底部展示并可重试。
 class NotifyPagedListView<T> extends StatefulWidget {
   const NotifyPagedListView({
     super.key,
@@ -29,7 +31,7 @@ class NotifyPagedListView<T> extends StatefulWidget {
   /// 下拉刷新回调。
   final Future<void> Function() onRefresh;
 
-  /// 触底加载下一页。
+  /// 触底加载下一页（重复调用是安全的，Notifier 内部有在途去重）。
   final VoidCallback onLoadMore;
 
   /// 首次加载失败时的重试。
@@ -68,6 +70,9 @@ class _NotifyPagedListViewState<T> extends State<NotifyPagedListView<T>> {
 
   void _onScroll() {
     if (!_controller.hasClients) return;
+    // 上一页加载失败时不再自动重试，避免滚动到底部反复打同一个失败请求，
+    // 由底部的「重试」按钮显式触发。
+    if (widget.state.valueOrNull?.loadMoreError != null) return;
     final position = _controller.position;
     if (position.pixels >= position.maxScrollExtent - 240) {
       widget.onLoadMore();
@@ -135,7 +140,8 @@ class _NotifyPagedListViewState<T> extends State<NotifyPagedListView<T>> {
           return _Footer(
             loading: paged.loadingMore,
             hasMore: paged.hasMore,
-            total: paged.total,
+            loaded: items.length,
+            error: paged.loadMoreError,
             onLoadMore: widget.onLoadMore,
           );
         },
@@ -148,13 +154,17 @@ class _Footer extends StatelessWidget {
   const _Footer({
     required this.loading,
     required this.hasMore,
-    required this.total,
+    required this.loaded,
+    required this.error,
     required this.onLoadMore,
   });
 
   final bool loading;
   final bool hasMore;
-  final int total;
+
+  /// 已加载条数（全部加载完时即总条数）。
+  final int loaded;
+  final Object? error;
   final VoidCallback onLoadMore;
 
   @override
@@ -167,6 +177,24 @@ class _Footer extends StatelessWidget {
         height: 20,
         child: CircularProgressIndicator(strokeWidth: 2),
       );
+    } else if (error != null) {
+      child = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              '加载下一页失败：${describeError(error!)}',
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.error),
+            ),
+          ),
+          TextButton(onPressed: onLoadMore, child: const Text('重试')),
+        ],
+      );
     } else if (hasMore) {
       child = TextButton(
         onPressed: onLoadMore,
@@ -174,7 +202,7 @@ class _Footer extends StatelessWidget {
       );
     } else {
       child = Text(
-        '共 $total 条',
+        '共 $loaded 条',
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),

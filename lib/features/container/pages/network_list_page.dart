@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/container_network.dart';
 import '../models/json_utils.dart';
@@ -28,7 +30,7 @@ class NetworkListPage extends ConsumerWidget {
     ContainerNetwork network,
   ) async {
     if (network.isPredefined) {
-      showErrorSnackBar(context, 'Docker 预置网络「${network.name}」不可删除');
+      showInfoSnack(context, '「${network.name}」是容器引擎预置网络，不可删除');
       return;
     }
     final ok = await showConfirmDialog(
@@ -78,14 +80,14 @@ class NetworkListPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('网络管理'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新网络列表',
             icon: const Icon(Icons.refresh),
             onPressed: () =>
                 ref.read(containerNetworksProvider.notifier).reload(),
           ),
-          IconButton(
-            tooltip: '清理未使用网络',
+          A11yIconButton(
+            tooltip: '清理未使用的网络',
             icon: const Icon(Icons.cleaning_services_outlined),
             onPressed: () => _prune(context, ref),
           ),
@@ -210,8 +212,12 @@ class _NetworkTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: '删除网络',
+                A11yIconButton(
+                  // 预置网络的按钮为禁用态，tooltip 说明原因，
+                  // 否则读屏用户只会听到「已禁用」而不知道为什么。
+                  tooltip: network.isPredefined
+                      ? '预置网络不可删除'
+                      : '删除网络 ${network.name}',
                   icon: Icon(
                     Icons.delete_outline,
                     color: network.isPredefined

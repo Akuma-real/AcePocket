@@ -78,7 +78,8 @@ class AlertRuleTile extends StatelessWidget {
                     )
                   else
                     PopupMenuButton<String>(
-                      tooltip: '更多操作',
+                      tooltip:
+                          '${rule.name.isEmpty ? '未命名规则' : rule.name} 的更多操作',
                       onSelected: (value) {
                         switch (value) {
                           case 'edit':
@@ -111,6 +112,8 @@ class AlertRuleTile extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   rule.metricTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -191,6 +194,9 @@ class AlertRecordTile extends StatelessWidget {
               record.message.isEmpty
                   ? '${record.metricTitle} 当前值 ${formatThreshold(record.value)}'
                   : record.message,
+              // 面板返回的 message 偶尔很长，限制行数避免单条记录占满整屏。
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 8),

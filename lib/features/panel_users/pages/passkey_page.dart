@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -11,7 +13,6 @@ import '../../../core/widgets/section_card.dart';
 import '../models/panel_user.dart';
 import '../models/passkey.dart';
 import '../providers/panel_user_providers.dart';
-import '../widgets/panel_user_dialogs.dart';
 import 'panel_users_page.dart' show formatDateTime;
 
 /// 通行密钥（Passkey）管理页。
@@ -74,9 +75,9 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
           .deletePasskey(passkey.id, userId: passkey.userId);
       ref.invalidate(passkeyListProvider(passkey.userId));
       ref.invalidate(passkeyStatusProvider);
-      if (mounted) showSnack(context, '通行密钥已删除');
+      if (mounted) showSuccessSnack(context, '通行密钥已删除');
     } catch (e) {
-      if (mounted) showSnack(context, errorMessage(e), error: true);
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _deletingId = null);
     }
@@ -92,8 +93,8 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
       appBar: AppBar(
         title: const Text('通行密钥'),
         actions: [
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新通行密钥信息',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(passkeyStatusProvider);
@@ -114,7 +115,12 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
                 ref.invalidate(panelUserOptionsProvider);
                 ref.invalidate(currentPanelUserProvider);
                 if (userId != null) ref.invalidate(passkeyListProvider(userId));
-                await ref.read(passkeyStatusProvider.future);
+                try {
+                  await ref.read(passkeyStatusProvider.future);
+                } catch (_) {
+                  // 失败由状态卡片自己的 ErrorView 展示；异常若抛回
+                  // RefreshIndicator 会变成未捕获的 zone 异常。
+                }
               },
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -124,12 +130,7 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
                   _noticeCard(),
                   _userSelector(userId),
                   if (userId == null)
-                    const SectionCard(
-                      child: SizedBox(
-                        height: 120,
-                        child: LoadingView(message: '读取用户信息…'),
-                      ),
-                    )
+                    _userFallbackCard(currentAsync)
                   else
                     _passkeyList(userId),
                 ],
@@ -137,6 +138,36 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------- 用户兜底卡片
+
+  /// 还没确定要查看哪个用户时的占位：区分「读取中」「读取失败」「取不到用户」，
+  /// 避免 `GET /api/user/info` 失败后永远停在一个转不完的菊花上。
+  Widget _userFallbackCard(AsyncValue<PanelUserInfo> currentAsync) {
+    final error = currentAsync.error;
+    if (error != null) {
+      return SectionCard(
+        child: ErrorView(
+          error: error,
+          onRetry: () => ref.invalidate(currentPanelUserProvider),
+        ),
+      );
+    }
+    if (!currentAsync.isLoading) {
+      return const SectionCard(
+        child: EmptyView(
+          message: '未能确定要查看的用户\n请在上方选择一个面板用户',
+          icon: Icons.person_search_outlined,
+        ),
+      );
+    }
+    return const SectionCard(
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: LoadingView(message: '读取用户信息…'),
       ),
     );
   }
@@ -150,16 +181,15 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
     return SectionCard(
       title: '面板状态',
       child: statusAsync.when(
-        loading: () => const SizedBox(
-          height: 84,
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
           child: LoadingView(),
         ),
-        error: (error, _) => SizedBox(
-          height: 140,
-          child: ErrorView(
-            error: error,
-            onRetry: () => ref.invalidate(passkeyStatusProvider),
-          ),
+        // 不能套固定高度的 SizedBox：ErrorView 光是图标 + 间距 + 重试按钮就要
+        // 200dp 以上，固定高度会把错误文案裁掉、「重试」按钮完全看不见也点不到。
+        error: (error, _) => ErrorView(
+          error: error,
+          onRetry: () => ref.invalidate(passkeyStatusProvider),
         ),
         data: (status) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -228,13 +258,13 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
     return SectionCard(
       title: '用户',
       child: optionsAsync.when(
-        loading: () => const SizedBox(height: 56, child: LoadingView()),
-        error: (error, _) => SizedBox(
-          height: 140,
-          child: ErrorView(
-            error: error,
-            onRetry: () => ref.invalidate(panelUserOptionsProvider),
-          ),
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: LoadingView(),
+        ),
+        error: (error, _) => ErrorView(
+          error: error,
+          onRetry: () => ref.invalidate(panelUserOptionsProvider),
         ),
         data: (users) {
           if (users.isEmpty) {
@@ -289,13 +319,13 @@ class _PasskeyPageState extends ConsumerState<PasskeyPage> {
     return SectionCard(
       title: '已注册的通行密钥',
       child: listAsync.when(
-        loading: () => const SizedBox(height: 120, child: LoadingView()),
-        error: (error, _) => SizedBox(
-          height: 160,
-          child: ErrorView(
-            error: error,
-            onRetry: () => ref.invalidate(passkeyListProvider(userId)),
-          ),
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: LoadingView(),
+        ),
+        error: (error, _) => ErrorView(
+          error: error,
+          onRetry: () => ref.invalidate(passkeyListProvider(userId)),
         ),
         data: (passkeys) {
           if (passkeys.isEmpty) {
@@ -431,18 +461,18 @@ class _PasskeyTile extends StatelessWidget {
             ],
           ),
         ),
+        // 删除中与删除按钮占同样的 48dp 见方，切换时行内不会跳动。
         if (deleting)
-          const Padding(
-            padding: EdgeInsets.all(8),
-            child: SizedBox(
+          minTouchTarget(
+            child: const SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           )
         else
-          IconButton(
-            tooltip: '删除',
+          A11yIconButton(
+            tooltip: '删除通行密钥 ${passkey.name.isEmpty ? '未命名' : passkey.name}',
             icon: Icon(Icons.delete_outline, color: colorScheme.error),
             onPressed: onDelete,
           ),

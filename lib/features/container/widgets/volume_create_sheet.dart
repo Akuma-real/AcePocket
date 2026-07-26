@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../models/kv.dart';
 import '../providers/container_providers.dart';
 import 'action_runner.dart';
@@ -79,9 +80,12 @@ class _VolumeCreateSheetState extends ConsumerState<_VolumeCreateSheet> {
                   Expanded(
                     child: Text('创建存储卷', style: theme.textTheme.titleMedium),
                   ),
-                  IconButton(
+                  A11yIconButton(
+                    tooltip: '关闭创建存储卷面板',
                     icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(false),
+                    onPressed: _submitting
+                        ? null
+                        : () => Navigator.of(context).pop(false),
                   ),
                 ],
               ),

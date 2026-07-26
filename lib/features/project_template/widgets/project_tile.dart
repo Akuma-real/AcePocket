@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/a11y.dart';
 import '../models/project.dart';
 import 'formatters.dart';
 
@@ -136,11 +138,11 @@ class ProjectTile extends StatelessWidget {
                     _Metric(label: 'PID', value: '${project.pid}'),
                     _Metric(
                       label: '内存',
-                      value: formatBytes(project.memory),
+                      value: formatBytes(project.memory, fractionDigits: 1),
                     ),
                     _Metric(
                       label: 'CPU',
-                      value: formatPercent(project.cpu),
+                      value: formatCpuPercent(project.cpu),
                     ),
                     if (project.uptime.isNotEmpty)
                       _Metric(label: '运行', value: project.uptime),
@@ -151,20 +153,24 @@ class ProjectTile extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Row(
-                      children: [
-                        Text(
-                          '自启',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
+                    // 读屏播报「项目 xxx 的开机自启」+ 开关自身的开/关状态，
+                    // 避免列表里一排匿名开关分不清控制的是哪个项目。
+                    child: a11ySwitch(
+                      label: '项目 ${project.name} 的开机自启',
+                      child: Row(
+                        children: [
+                          Text(
+                            '自启',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                        Switch(
-                          value: project.enabled,
-                          onChanged:
-                              busy ? null : (_) => onToggleAutostart(),
-                        ),
-                      ],
+                          Switch(
+                            value: project.enabled,
+                            onChanged: busy ? null : (_) => onToggleAutostart(),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   TextButton.icon(

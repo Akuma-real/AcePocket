@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/utils/input_validation.dart';
+import '../../../core/widgets/a11y.dart';
 
 /// 域名动态输入框列表（对应面板前端的 n-dynamic-input）。
 ///
@@ -125,8 +126,8 @@ class _DomainListFieldState extends State<DomainListField> {
                   ),
                 ),
                 if (widget.enabled)
-                  IconButton(
-                    tooltip: '删除',
+                  A11yIconButton(
+                    tooltip: '删除第 ${i + 1} 个${widget.label}',
                     onPressed: _controllers.length == 1 &&
                             _controllers[i].text.isEmpty
                         ? null

@@ -31,7 +31,7 @@ class SystemInfoCard extends ConsumerWidget {
           ),
         ),
         error: (error, _) => InlineError(
-          message: error is ApiException ? error.message : '$error',
+          message: describeError(error),
           onRetry: () => ref.invalidate(systemInfoProvider),
         ),
         data: (info) => Column(
@@ -45,8 +45,7 @@ class SystemInfoCard extends ConsumerWidget {
                   ? null
                   : theme.colorScheme.error,
             ),
-            if (!info.osSupported)
-              _hint(context, '当前系统版本低于面板要求，部分功能可能不可用'),
+            if (!info.osSupported) _hint(context, '当前系统版本低于面板要求，部分功能可能不可用'),
             if (info.osEol) _hint(context, '当前系统已停止官方维护（EOL），建议尽快升级'),
             InfoRow(label: '内核', value: info.kernelVersion, monospace: true),
             InfoRow(label: '架构', value: info.kernelArch),

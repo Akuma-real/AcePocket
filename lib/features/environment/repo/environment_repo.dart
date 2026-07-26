@@ -1,4 +1,5 @@
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_exception.dart';
 import '../models/environment_models.dart';
 import '../models/php_models.dart';
 
@@ -226,7 +227,9 @@ class EnvironmentRepository {
   Future<PhpConfigTune> phpConfigTune(int version) async {
     final data = await _api.get('/environment/php/$version/config_tune');
     if (data is! Map<String, dynamic>) {
-      throw StateError('配置调优接口返回了非预期的数据结构');
+      // 用 ApiException 而非 StateError：后者的 toString 带英文
+      // "Bad state: " 前缀，会原样出现在 ErrorView 与错误提示里。
+      throw const ApiException('配置调优接口返回了非预期的数据结构，请确认面板版本');
     }
     return PhpConfigTune.fromJson(data);
   }

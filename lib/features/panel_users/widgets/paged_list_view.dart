@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -22,7 +23,10 @@ class PagedListView<T> extends StatefulWidget {
     this.emptyIcon = Icons.inbox_outlined,
     this.emptyAction,
     this.padding = const EdgeInsets.fromLTRB(0, 4, 0, 96),
+    this.totalLabel = _defaultTotalLabel,
   });
+
+  static String _defaultTotalLabel(int total) => '共 $total 条';
 
   final AsyncValue<PagedState<T>> state;
 
@@ -44,6 +48,9 @@ class PagedListView<T> extends StatefulWidget {
   final IconData emptyIcon;
   final Widget? emptyAction;
   final EdgeInsetsGeometry padding;
+
+  /// 全部加载完毕时列表底部的合计文案（默认「共 n 条」，调用方可换成业务量词）。
+  final String Function(int total) totalLabel;
 
   @override
   State<PagedListView<T>> createState() => _PagedListViewState<T>();
@@ -68,6 +75,9 @@ class _PagedListViewState<T> extends State<PagedListView<T>> {
 
   void _onScroll() {
     if (!_controller.hasClients) return;
+    // 上一页加载失败后不再自动重试：否则用户每滑一下就重发一次注定失败的请求，
+    // 面板不可达时会变成持续的请求风暴。改为由底部「重试」按钮显式触发。
+    if (widget.state.valueOrNull?.loadMoreError != null) return;
     final position = _controller.position;
     if (position.pixels >= position.maxScrollExtent - 240) {
       widget.onLoadMore();
@@ -132,6 +142,8 @@ class _PagedListViewState<T> extends State<PagedListView<T>> {
             loading: paged.loadingMore,
             hasMore: paged.hasMore,
             total: paged.total,
+            error: paged.loadMoreError,
+            totalLabel: widget.totalLabel,
             onLoadMore: widget.onLoadMore,
           );
         },
@@ -145,17 +157,50 @@ class _Footer extends StatelessWidget {
     required this.loading,
     required this.hasMore,
     required this.total,
+    required this.error,
+    required this.totalLabel,
     required this.onLoadMore,
   });
 
   final bool loading;
   final bool hasMore;
   final int total;
+
+  /// 加载下一页失败时的错误；展示原因并提供重试。
+  final Object? error;
+  final String Function(int total) totalLabel;
   final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // 加载下一页失败：说明原因并提供重试，否则用户只会看到列表停在半路。
+    final loadMoreError = error;
+    if (!loading && loadMoreError != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          children: [
+            Text(
+              '加载更多失败：${describeError(loadMoreError)}',
+              textAlign: TextAlign.center,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.error),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onLoadMore,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+
     final Widget child;
     if (loading) {
       child = const SizedBox(
@@ -170,7 +215,8 @@ class _Footer extends StatelessWidget {
       );
     } else {
       child = Text(
-        '共 $total 个用户',
+        totalLabel(total),
+        textAlign: TextAlign.center,
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),

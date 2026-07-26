@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/system_service.dart';
 import '../providers/systemctl_providers.dart';
@@ -29,25 +32,14 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
 
   String get _name => widget.service.name;
 
-  void _toast(String message, {bool error = false}) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-      ),
-    );
-  }
-
   Future<void> _run(
     Future<void> Function(SystemctlRepo repo) action, {
     required String successMessage,
   }) async {
+    if (_busy) return;
     final repo = ref.read(systemctlRepoProvider);
     if (repo == null) {
-      _toast('尚未选择服务器', error: true);
+      showErrorSnack(context, const ApiException('尚未选择服务器'));
       return;
     }
     setState(() => _busy = true);
@@ -55,9 +47,9 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
       await action(repo);
       if (!mounted) return;
       ref.invalidate(serviceStateProvider(_name));
-      _toast(successMessage);
+      showSuccessSnack(context, successMessage);
     } catch (e) {
-      _toast('操作失败：$e', error: true);
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -76,7 +68,7 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
       confirmText: '停止',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     await _run(
       (repo) => repo.stop(_name),
       successMessage: '$_name 已停止',
@@ -91,7 +83,7 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
       confirmText: '重启',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     await _run(
       (repo) => repo.restart(_name),
       successMessage: '$_name 已重启',
@@ -116,7 +108,7 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
       confirmText: '清空',
       danger: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     await _run(
       (repo) => repo.clearLog(_name),
       successMessage: '日志已清空',
@@ -131,11 +123,16 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
       confirmText: '移除',
       danger: true,
     );
-    if (!ok) return;
-    await ref.read(customServicesProvider.notifier).remove(_name);
+    if (!ok || !mounted) return;
+    try {
+      await ref.read(customServicesProvider.notifier).remove(_name);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+      return;
+    }
     if (!mounted) return;
     widget.onRemoved?.call();
-    _toast('已移除 $_name');
+    showSuccessSnack(context, '已从列表中移除 $_name');
   }
 
   @override
@@ -199,12 +196,15 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
                 PopupMenuButton<String>(
                   enabled: !_busy,
+                  tooltip: '$_name 的更多操作',
                   onSelected: (value) {
                     switch (value) {
                       case 'reload':
@@ -270,7 +270,7 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
                   children: [
                     Expanded(
                       child: Text(
-                        '状态获取失败：${async.error}',
+                        '状态获取失败：${describeError(async.error!)}',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: colorScheme.error),
                         maxLines: 2,
@@ -288,15 +288,24 @@ class _ServiceTileState extends ConsumerState<ServiceTile> {
             const Divider(height: 16),
             Row(
               children: [
-                Text(
-                  '开机自启',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                a11ySwitch(
+                  label: '服务 $_name 的开机自启',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '开机自启',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Switch(
+                        value: state?.enabled ?? false,
+                        onChanged:
+                            (_busy || state == null) ? null : _setEnabled,
+                      ),
+                    ],
                   ),
-                ),
-                Switch(
-                  value: state?.enabled ?? false,
-                  onChanged: (_busy || state == null) ? null : _setEnabled,
                 ),
                 const Spacer(),
                 if (_busy)

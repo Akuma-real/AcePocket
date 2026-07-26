@@ -101,7 +101,7 @@ class ProcessTile extends StatelessWidget {
                             children: [
                               _Metric(
                                 icon: Icons.speed,
-                                text: 'CPU ${formatPercent(process.cpu)}',
+                                text: 'CPU ${formatCpuPercent(process.cpu)}',
                               ),
                               const SizedBox(width: 12),
                               _Metric(
@@ -136,6 +136,7 @@ class ProcessTile extends StatelessWidget {
                 )
               else
                 PopupMenuButton<String>(
+                  tooltip: '进程 ${process.name} 的操作',
                   onSelected: (value) {
                     switch (value) {
                       case 'detail':
