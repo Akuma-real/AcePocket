@@ -73,6 +73,8 @@ final websiteListProvider =
 class WebsiteListNotifier extends AsyncNotifier<WebsiteListState> {
   @override
   Future<WebsiteListState> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(websiteRepoProvider);
     // 类型筛选变化时自动重新加载第一页。
     ref.watch(websiteTypeFilterProvider);
     return _loadFirstPage();

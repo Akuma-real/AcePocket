@@ -65,6 +65,8 @@ final templateListProvider = AsyncNotifierProvider.autoDispose<
 class TemplateListNotifier extends PagedListNotifier<AppTemplate> {
   @override
   Future<PagedState<AppTemplate>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(templateRepoProvider);
     ref.watch(templateFilterProvider);
     return super.build();
   }

@@ -150,6 +150,13 @@ abstract class PagedNotifier<T>
 /// 防火墙端口规则列表。
 class FirewallRulesNotifier extends PagedNotifier<FirewallRule> {
   @override
+  Future<PagedState<FirewallRule>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<FirewallRule>> fetch(int page, int limit) =>
       ref.read(securityRepoProvider).firewallRules(page: page, limit: limit);
 }
@@ -159,6 +166,13 @@ final firewallRulesProvider = AsyncNotifierProvider.autoDispose<
 
 /// 防火墙 IP 规则列表。
 class FirewallIpRulesNotifier extends PagedNotifier<FirewallIpRule> {
+  @override
+  Future<PagedState<FirewallIpRule>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<Paged<FirewallIpRule>> fetch(int page, int limit) =>
       ref.read(securityRepoProvider).firewallIpRules(page: page, limit: limit);
@@ -171,6 +185,13 @@ final firewallIpRulesProvider = AsyncNotifierProvider.autoDispose<
 /// 防火墙端口转发列表。
 class FirewallForwardsNotifier extends PagedNotifier<FirewallForward> {
   @override
+  Future<PagedState<FirewallForward>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<FirewallForward>> fetch(int page, int limit) =>
       ref.read(securityRepoProvider).firewallForwards(page: page, limit: limit);
 }
@@ -182,6 +203,13 @@ final firewallForwardsProvider = AsyncNotifierProvider.autoDispose<
 /// 防篡改保护规则列表。
 class TamperRulesNotifier extends PagedNotifier<TamperRule> {
   @override
+  Future<PagedState<TamperRule>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<TamperRule>> fetch(int page, int limit) =>
       ref.read(securityRepoProvider).tamperRules(page: page, limit: limit);
 }
@@ -191,6 +219,13 @@ final tamperRulesProvider = AsyncNotifierProvider.autoDispose<
 
 /// 防篡改拦截日志列表。
 class TamperLogsNotifier extends PagedNotifier<TamperLog> {
+  @override
+  Future<PagedState<TamperLog>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<Paged<TamperLog>> fetch(int page, int limit) =>
       ref.read(securityRepoProvider).tamperLogs(page: page, limit: limit);
@@ -289,6 +324,8 @@ final scanOverviewProvider = FutureProvider.autoDispose<ScanOverview>(
 class ScanEventsNotifier extends PagedNotifier<ScanEvent> {
   @override
   Future<PagedState<ScanEvent>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(securityRepoProvider);
     // 时间范围 / 筛选条件变化时重建列表。
     ref.watch(scanRangeDaysProvider);
     ref.watch(scanEventFilterProvider);

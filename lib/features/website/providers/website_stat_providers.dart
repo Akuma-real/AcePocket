@@ -219,6 +219,13 @@ abstract class StatPagedNotifier<T>
 /// URI 统计（分页）。
 class StatUrisNotifier extends StatPagedNotifier<UriRank> {
   @override
+  Future<StatPagedState<UriRank>> build(StatQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(websiteStatRepoProvider);
+    return super.build(arg);
+  }
+
+  @override
   Future<StatPage<UriRank>> fetch(StatQuery query, int page) =>
       ref.read(websiteStatRepoProvider).uris(
             query.range,
@@ -234,6 +241,13 @@ final statUrisProvider = AsyncNotifierProvider.autoDispose
 
 /// 慢请求 URI 统计（分页）。
 class StatSlowUrisNotifier extends StatPagedNotifier<UriRank> {
+  @override
+  Future<StatPagedState<UriRank>> build(StatQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(websiteStatRepoProvider);
+    return super.build(arg);
+  }
+
   @override
   Future<StatPage<UriRank>> fetch(StatQuery query, int page) =>
       ref.read(websiteStatRepoProvider).slowUris(
@@ -252,6 +266,13 @@ final statSlowUrisProvider = AsyncNotifierProvider.autoDispose
 /// IP 统计（分页）。
 class StatIpsNotifier extends StatPagedNotifier<IpRank> {
   @override
+  Future<StatPagedState<IpRank>> build(StatQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(websiteStatRepoProvider);
+    return super.build(arg);
+  }
+
+  @override
   Future<StatPage<IpRank>> fetch(StatQuery query, int page) =>
       ref.read(websiteStatRepoProvider).ips(
             query.range,
@@ -267,6 +288,13 @@ final statIpsProvider = AsyncNotifierProvider.autoDispose
 
 /// 错误日志（分页）。
 class StatErrorsNotifier extends StatPagedNotifier<ErrorLogItem> {
+  @override
+  Future<StatPagedState<ErrorLogItem>> build(StatQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(websiteStatRepoProvider);
+    return super.build(arg);
+  }
+
   @override
   Future<StatPage<ErrorLogItem>> fetch(StatQuery query, int page) =>
       ref.read(websiteStatRepoProvider).errors(

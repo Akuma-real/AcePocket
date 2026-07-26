@@ -50,6 +50,8 @@ class SshHostsNotifier extends AutoDisposeAsyncNotifier<PagedState<SshHost>> {
 
   @override
   Future<PagedState<SshHost>> build() async {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(sshHostsRepoProvider);
     final paged = await _fetch(1);
     return PagedState<SshHost>(items: paged.items, total: paged.total, page: 1);
   }

@@ -26,6 +26,13 @@ final certListProvider =
 
 class CertListNotifier extends PagedListNotifier<CertListItem> {
   @override
+  Future<PagedState<CertListItem>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(certRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<PageResult<CertListItem>> fetch(int page, int limit) =>
       ref.read(certRepoProvider).listCerts(page: page, limit: limit);
 }
@@ -37,6 +44,13 @@ final certDnsListProvider =
 
 class CertDnsListNotifier extends PagedListNotifier<CertDns> {
   @override
+  Future<PagedState<CertDns>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(certRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<PageResult<CertDns>> fetch(int page, int limit) =>
       ref.read(certRepoProvider).listDns(page: page, limit: limit);
 }
@@ -46,6 +60,13 @@ final certAccountListProvider = AsyncNotifierProvider.autoDispose<
     CertAccountListNotifier, PagedState<CertAccount>>(CertAccountListNotifier.new);
 
 class CertAccountListNotifier extends PagedListNotifier<CertAccount> {
+  @override
+  Future<PagedState<CertAccount>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(certRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<PageResult<CertAccount>> fetch(int page, int limit) =>
       ref.read(certRepoProvider).listAccounts(page: page, limit: limit);

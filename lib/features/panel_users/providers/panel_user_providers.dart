@@ -130,6 +130,13 @@ abstract class PagedNotifier<T>
 /// 面板用户列表（`GET /api/users`，分页）。
 class PanelUsersNotifier extends PagedNotifier<PanelUser> {
   @override
+  Future<PagedState<PanelUser>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(panelUserRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<PanelUser>> fetch(int page, int limit) =>
       ref.read(panelUserRepoProvider).list(page: page, limit: limit);
 

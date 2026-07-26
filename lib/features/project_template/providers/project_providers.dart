@@ -32,6 +32,8 @@ final projectListProvider = AsyncNotifierProvider.autoDispose<
 class ProjectListNotifier extends PagedListNotifier<ProjectDetail> {
   @override
   Future<PagedState<ProjectDetail>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(projectRepoProvider);
     // 类型筛选变化时自动重新加载第一页。
     ref.watch(projectTypeFilterProvider);
     return super.build();

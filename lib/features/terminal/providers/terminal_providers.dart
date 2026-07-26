@@ -145,6 +145,10 @@ class TerminalSessionController
 
   @override
   TerminalSessionState build(TerminalSessionSpec arg) {
+    // watch 而非 read：切换服务器时需断开旧连接并向新服务器重新建连。
+    ref.watch(activeServerProvider);
+    // 重建（服务器切换）会先触发 onDispose 的 _teardown，这里恢复可用标记。
+    _disposed = false;
     _terminal ??= Terminal(
       maxLines: ref.read(terminalSettingsProvider).scrollback,
       onOutput: _sendInput,

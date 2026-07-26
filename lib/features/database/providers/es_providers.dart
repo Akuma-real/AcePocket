@@ -43,8 +43,11 @@ final esDataProvider = AsyncNotifierProvider.autoDispose
 class EsDataNotifier
     extends AutoDisposeFamilyAsyncNotifier<PagedState<EsDocument>, EsDataQuery> {
   @override
-  Future<PagedState<EsDocument>> build(EsDataQuery arg) =>
-      loadFirstPage(_fetch);
+  Future<PagedState<EsDocument>> build(EsDataQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(databaseRepoProvider);
+    return loadFirstPage(_fetch);
+  }
 
   PageFetcher<EsDocument> get _fetch =>
       (page, limit) => ref.read(databaseRepoProvider).esData(

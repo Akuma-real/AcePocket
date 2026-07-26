@@ -41,7 +41,11 @@ final databaseListProvider = AsyncNotifierProvider.autoDispose
 class DatabaseListNotifier
     extends AutoDisposeFamilyAsyncNotifier<PagedState<Database>, String> {
   @override
-  Future<PagedState<Database>> build(String arg) => loadFirstPage(_fetch);
+  Future<PagedState<Database>> build(String arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(databaseRepoProvider);
+    return loadFirstPage(_fetch);
+  }
 
   PageFetcher<Database> get _fetch =>
       (page, limit) => ref.read(databaseRepoProvider).listDatabases(
@@ -73,7 +77,11 @@ final databaseServerListProvider = AsyncNotifierProvider.autoDispose
 class DatabaseServerListNotifier
     extends AutoDisposeFamilyAsyncNotifier<PagedState<DatabaseServer>, String> {
   @override
-  Future<PagedState<DatabaseServer>> build(String arg) => loadFirstPage(_fetch);
+  Future<PagedState<DatabaseServer>> build(String arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(databaseRepoProvider);
+    return loadFirstPage(_fetch);
+  }
 
   PageFetcher<DatabaseServer> get _fetch =>
       (page, limit) => ref.read(databaseRepoProvider).listServers(
@@ -103,7 +111,11 @@ final databaseUserListProvider = AsyncNotifierProvider.autoDispose
 class DatabaseUserListNotifier
     extends AutoDisposeFamilyAsyncNotifier<PagedState<DatabaseUser>, String> {
   @override
-  Future<PagedState<DatabaseUser>> build(String arg) => loadFirstPage(_fetch);
+  Future<PagedState<DatabaseUser>> build(String arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(databaseRepoProvider);
+    return loadFirstPage(_fetch);
+  }
 
   PageFetcher<DatabaseUser> get _fetch =>
       (page, limit) => ref.read(databaseRepoProvider).listUsers(

@@ -177,6 +177,8 @@ class NetworkConnectionsNotifier
 
   @override
   Future<PagedState<NetworkConnection>> build() async {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(toolboxMiscRepoProvider);
     // 筛选条件变化时重建列表。
     ref.watch(networkFilterProvider);
     final paged = await _fetch(1);

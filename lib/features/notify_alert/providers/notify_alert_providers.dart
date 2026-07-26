@@ -19,6 +19,13 @@ final notifyAlertRepoProvider = Provider<NotifyAlertRepository>(
 /// 告警规则分页列表。
 class AlertRulesNotifier extends PagedListNotifier<AlertRule> {
   @override
+  Future<PagedState<AlertRule>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(notifyAlertRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<PageResult<AlertRule>> fetch(int page, int limit) =>
       ref.read(notifyAlertRepoProvider).alertRules(page: page, limit: limit);
 }
@@ -37,6 +44,13 @@ final alertRuleProvider =
 /// 告警记录分页列表。
 class AlertRecordsNotifier extends PagedListNotifier<AlertRecord> {
   @override
+  Future<PagedState<AlertRecord>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(notifyAlertRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<PageResult<AlertRecord>> fetch(int page, int limit) =>
       ref.read(notifyAlertRepoProvider).alertRecords(page: page, limit: limit);
 }
@@ -48,6 +62,13 @@ final alertRecordsProvider = AsyncNotifierProvider.autoDispose<
 
 /// 通知渠道分页列表。
 class NotifyChannelsNotifier extends PagedListNotifier<NotifyChannel> {
+  @override
+  Future<PagedState<NotifyChannel>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(notifyAlertRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<PageResult<NotifyChannel>> fetch(int page, int limit) => ref
       .read(notifyAlertRepoProvider)
@@ -79,6 +100,13 @@ final notifySettingProvider = FutureProvider.autoDispose<NotifySetting>((ref) {
 
 /// WebHook 分页列表。
 class WebhooksNotifier extends PagedListNotifier<WebHook> {
+  @override
+  Future<PagedState<WebHook>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(notifyAlertRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<PageResult<WebHook>> fetch(int page, int limit) =>
       ref.read(notifyAlertRepoProvider).webhooks(page: page, limit: limit);

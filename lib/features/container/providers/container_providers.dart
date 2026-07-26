@@ -113,6 +113,8 @@ final containerKeywordProvider = StateProvider.autoDispose<String>((ref) => '');
 class ContainersNotifier extends PagedNotifier<ContainerItem> {
   @override
   Future<PagedState<ContainerItem>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(containerRepoProvider);
     // 关键词变化时自动重建。
     ref.watch(containerKeywordProvider);
     return super.build();
@@ -146,6 +148,13 @@ final containerInspectProvider =
 
 class ContainerImagesNotifier extends PagedNotifier<ContainerImage> {
   @override
+  Future<PagedState<ContainerImage>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(containerRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<ContainerImage>> fetch(int page, int limit) =>
       ref.read(containerRepoProvider).listImages(page: page, limit: limit);
 }
@@ -158,6 +167,13 @@ final containerImagesProvider = AsyncNotifierProvider.autoDispose<
 // ------------------------------------------------------------------ 网络
 
 class ContainerNetworksNotifier extends PagedNotifier<ContainerNetwork> {
+  @override
+  Future<PagedState<ContainerNetwork>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(containerRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<Paged<ContainerNetwork>> fetch(int page, int limit) =>
       ref.read(containerRepoProvider).listNetworks(page: page, limit: limit);
@@ -172,6 +188,13 @@ final containerNetworksProvider = AsyncNotifierProvider.autoDispose<
 
 class ContainerVolumesNotifier extends PagedNotifier<ContainerVolume> {
   @override
+  Future<PagedState<ContainerVolume>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(containerRepoProvider);
+    return super.build();
+  }
+
+  @override
   Future<Paged<ContainerVolume>> fetch(int page, int limit) =>
       ref.read(containerRepoProvider).listVolumes(page: page, limit: limit);
 }
@@ -184,6 +207,13 @@ final containerVolumesProvider = AsyncNotifierProvider.autoDispose<
 // ------------------------------------------------------------------ 编排
 
 class ContainerComposesNotifier extends PagedNotifier<ContainerCompose> {
+  @override
+  Future<PagedState<ContainerCompose>> build() {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(containerRepoProvider);
+    return super.build();
+  }
+
   @override
   Future<Paged<ContainerCompose>> fetch(int page, int limit) =>
       ref.read(containerRepoProvider).listComposes(page: page, limit: limit);
