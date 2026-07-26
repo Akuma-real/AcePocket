@@ -74,7 +74,7 @@ class PagedListView<T> extends StatelessWidget {
       onNotification: (notification) {
         if (notification.metrics.axis == Axis.vertical &&
             paged.hasMore &&
-            !paged.isLoadingMore &&
+            !paged.loadingMore &&
             paged.loadMoreError == null &&
             notification.metrics.pixels >=
                 notification.metrics.maxScrollExtent - 240) {
@@ -107,7 +107,7 @@ class _Footer<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (paged.isLoadingMore) {
+    if (paged.loadingMore) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 20),
         child: Center(

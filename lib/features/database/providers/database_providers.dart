@@ -38,30 +38,21 @@ final databaseListProvider = AsyncNotifierProvider.autoDispose
   DatabaseListNotifier.new,
 );
 
-class DatabaseListNotifier
-    extends AutoDisposeFamilyAsyncNotifier<PagedState<Database>, String> {
+class DatabaseListNotifier extends DatabasePagedNotifier<Database, String> {
   @override
   Future<PagedState<Database>> build(String arg) {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(databaseRepoProvider);
-    return loadFirstPage(_fetch);
+    return super.build(arg);
   }
 
-  PageFetcher<Database> get _fetch =>
+  @override
+  PageFetcher<Database> get fetcher =>
       (page, limit) => ref.read(databaseRepoProvider).listDatabases(
             page: page,
             limit: limit,
             type: arg.isEmpty ? null : arg,
           );
-
-  /// 重新加载第一页（下拉刷新 / 增删改之后调用）。
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(() => loadFirstPage(_fetch));
-  }
-
-  /// 加载下一页。
-  Future<void> loadMore() =>
-      runPagedLoadMore(() => state, (value) => state = value, _fetch);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,27 +66,21 @@ final databaseServerListProvider = AsyncNotifierProvider.autoDispose
 );
 
 class DatabaseServerListNotifier
-    extends AutoDisposeFamilyAsyncNotifier<PagedState<DatabaseServer>, String> {
+    extends DatabasePagedNotifier<DatabaseServer, String> {
   @override
   Future<PagedState<DatabaseServer>> build(String arg) {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(databaseRepoProvider);
-    return loadFirstPage(_fetch);
+    return super.build(arg);
   }
 
-  PageFetcher<DatabaseServer> get _fetch =>
+  @override
+  PageFetcher<DatabaseServer> get fetcher =>
       (page, limit) => ref.read(databaseRepoProvider).listServers(
             page: page,
             limit: limit,
             type: arg.isEmpty ? null : arg,
           );
-
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(() => loadFirstPage(_fetch));
-  }
-
-  Future<void> loadMore() =>
-      runPagedLoadMore(() => state, (value) => state = value, _fetch);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,27 +94,21 @@ final databaseUserListProvider = AsyncNotifierProvider.autoDispose
 );
 
 class DatabaseUserListNotifier
-    extends AutoDisposeFamilyAsyncNotifier<PagedState<DatabaseUser>, String> {
+    extends DatabasePagedNotifier<DatabaseUser, String> {
   @override
   Future<PagedState<DatabaseUser>> build(String arg) {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(databaseRepoProvider);
-    return loadFirstPage(_fetch);
+    return super.build(arg);
   }
 
-  PageFetcher<DatabaseUser> get _fetch =>
+  @override
+  PageFetcher<DatabaseUser> get fetcher =>
       (page, limit) => ref.read(databaseRepoProvider).listUsers(
             page: page,
             limit: limit,
             type: arg.isEmpty ? null : arg,
           );
-
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(() => loadFirstPage(_fetch));
-  }
-
-  Future<void> loadMore() =>
-      runPagedLoadMore(() => state, (value) => state = value, _fetch);
 }
 
 /// 指定服务器上的数据库用户（用于「修改数据库密码」时挑选授权用户）。

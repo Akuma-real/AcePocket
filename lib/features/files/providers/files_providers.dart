@@ -2,11 +2,14 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/file_item.dart';
 import '../models/file_share.dart';
 import '../repo/file_repo.dart';
 import '../repo/transfer_client.dart';
+
+export '../../../core/providers/paged_notifier_base.dart' show PagedState;
 
 /// 文件浏览器默认起始目录（与面板 Web 端默认标签页一致）。
 const String kDefaultBrowsePath = '/opt';
@@ -38,94 +41,38 @@ final downloadDirectoryProvider = FutureProvider<Directory>((ref) {
 typedef FileListQuery = ({String path, String keyword, String sort});
 
 /// 文件列表分页状态。
-class FileListState {
-  const FileListState({
-    required this.items,
-    required this.total,
-    required this.page,
-    required this.hasMore,
-    this.loadingMore = false,
-  });
-
-  final List<FileItem> items;
-  final int total;
-
-  /// 已加载到的页码（从 1 开始）。
-  final int page;
-  final bool hasMore;
-
-  /// 是否正在加载下一页。
-  final bool loadingMore;
-
-  FileListState copyWith({
-    List<FileItem>? items,
-    int? total,
-    int? page,
-    bool? hasMore,
-    bool? loadingMore,
-  }) {
-    return FileListState(
-      items: items ?? this.items,
-      total: total ?? this.total,
-      page: page ?? this.page,
-      hasMore: hasMore ?? this.hasMore,
-      loadingMore: loadingMore ?? this.loadingMore,
-    );
-  }
-}
+typedef FileListState = PagedState<FileItem>;
 
 /// 文件列表（按 路径 + 关键字 + 排序 维度缓存，支持分页追加）。
 final fileListProvider = AsyncNotifierProvider.autoDispose
     .family<FileListNotifier, FileListState, FileListQuery>(
         FileListNotifier.new);
 
-class FileListNotifier
-    extends AutoDisposeFamilyAsyncNotifier<FileListState, FileListQuery> {
-  static const int pageSize = 100;
+/// 并发控制（请求代次 / 在途标志 / loadMoreError）由
+/// [PagedFamilyAsyncNotifier] 统一提供；加载更多失败不打断已展示的列表，
+/// 错误记录到 `loadMoreError`，由列表底部展示并可重试。
+class FileListNotifier extends PagedFamilyAsyncNotifier<FileItem, FileListQuery> {
+  @override
+  int get pageSize => 100;
 
   @override
-  Future<FileListState> build(FileListQuery arg) async {
-    final page = await ref.watch(fileRepoProvider).list(
+  Future<FileListState> build(FileListQuery arg) {
+    // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
+    ref.watch(fileRepoProvider);
+    return super.build(arg);
+  }
+
+  @override
+  Future<PagedResult<FileItem>> fetchPage(int page, int limit) async {
+    final result = await ref.read(fileRepoProvider).list(
           path: arg.path,
           keyword: arg.keyword,
           sub: arg.keyword.isNotEmpty,
           sort: arg.sort,
-          page: 1,
-          limit: pageSize,
+          page: page,
+          limit: limit,
         );
-    return FileListState(
-      items: page.items,
-      total: page.total,
-      page: 1,
-      hasMore: page.items.length < page.total,
-    );
-  }
-
-  /// 加载下一页并追加。已在加载或没有更多时为空操作；失败时静默还原
-  /// （首屏错误由 build 流程展示，加载更多失败不打断已展示的列表）。
-  Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || !current.hasMore || current.loadingMore) return;
-    state = AsyncData(current.copyWith(loadingMore: true));
-    try {
-      final next = await ref.read(fileRepoProvider).list(
-            path: arg.path,
-            keyword: arg.keyword,
-            sub: arg.keyword.isNotEmpty,
-            sort: arg.sort,
-            page: current.page + 1,
-            limit: pageSize,
-          );
-      final items = [...current.items, ...next.items];
-      state = AsyncData(FileListState(
-        items: items,
-        total: next.total,
-        page: current.page + 1,
-        hasMore: next.items.isNotEmpty && items.length < next.total,
-      ));
-    } catch (_) {
-      state = AsyncData(current.copyWith(loadingMore: false));
-    }
+    return PagedResult(items: result.items, total: result.total);
   }
 }
 

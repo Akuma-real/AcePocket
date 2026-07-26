@@ -1095,6 +1095,33 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           if (hasParentTile && index == 0) return _parentTile();
           final dataIndex = index - leadingCount;
           if (dataIndex >= visible.length) {
+            final loadMoreError = state.loadMoreError;
+            if (loadMoreError != null && !state.loadingMore) {
+              // 加载下一页失败：展示错误并允许点击重试（弱网下与「到底了」区分开）。
+              final theme = Theme.of(context);
+              return Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                child: Column(
+                  children: [
+                    Text(
+                      '加载失败：$loadMoreError',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.error),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () => ref
+                          .read(fileListProvider(_query).notifier)
+                          .loadMore(),
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('重试'),
+                    ),
+                  ],
+                ),
+              );
+            }
             // 触底自动加载下一页。
             WidgetsBinding.instance.addPostFrameCallback((_) {
               ref.read(fileListProvider(_query).notifier).loadMore();

@@ -40,16 +40,16 @@ final esDataProvider = AsyncNotifierProvider.autoDispose
   EsDataNotifier.new,
 );
 
-class EsDataNotifier
-    extends AutoDisposeFamilyAsyncNotifier<PagedState<EsDocument>, EsDataQuery> {
+class EsDataNotifier extends DatabasePagedNotifier<EsDocument, EsDataQuery> {
   @override
   Future<PagedState<EsDocument>> build(EsDataQuery arg) {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(databaseRepoProvider);
-    return loadFirstPage(_fetch);
+    return super.build(arg);
   }
 
-  PageFetcher<EsDocument> get _fetch =>
+  @override
+  PageFetcher<EsDocument> get fetcher =>
       (page, limit) => ref.read(databaseRepoProvider).esData(
             serverId: arg.serverId,
             index: arg.index,
@@ -57,11 +57,4 @@ class EsDataNotifier
             limit: limit,
             search: arg.search.isEmpty ? null : arg.search,
           );
-
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(() => loadFirstPage(_fetch));
-  }
-
-  Future<void> loadMore() =>
-      runPagedLoadMore(() => state, (value) => state = value, _fetch);
 }

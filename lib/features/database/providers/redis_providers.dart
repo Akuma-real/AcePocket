@@ -41,16 +41,16 @@ final redisDataProvider = AsyncNotifierProvider.autoDispose
   RedisDataNotifier.new,
 );
 
-class RedisDataNotifier extends AutoDisposeFamilyAsyncNotifier<
-    PagedState<RedisKv>, RedisDataQuery> {
+class RedisDataNotifier extends DatabasePagedNotifier<RedisKv, RedisDataQuery> {
   @override
   Future<PagedState<RedisKv>> build(RedisDataQuery arg) {
     // watch 而非 read：切换服务器时 repo 重建，列表需随之重新加载。
     ref.watch(databaseRepoProvider);
-    return loadFirstPage(_fetch);
+    return super.build(arg);
   }
 
-  PageFetcher<RedisKv> get _fetch =>
+  @override
+  PageFetcher<RedisKv> get fetcher =>
       (page, limit) => ref.read(databaseRepoProvider).redisData(
             serverId: arg.serverId,
             db: arg.db,
@@ -58,11 +58,4 @@ class RedisDataNotifier extends AutoDisposeFamilyAsyncNotifier<
             limit: limit,
             search: arg.search.isEmpty ? null : arg.search,
           );
-
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(() => loadFirstPage(_fetch));
-  }
-
-  Future<void> loadMore() =>
-      runPagedLoadMore(() => state, (value) => state = value, _fetch);
 }

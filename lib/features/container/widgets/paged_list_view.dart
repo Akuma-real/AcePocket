@@ -139,6 +139,8 @@ class _PagedListViewState<T> extends State<PagedListView<T>> {
                   hasMore: paged.hasMore,
                   loaded: paged.items.length,
                   total: paged.total,
+                  error: paged.loadMoreError,
+                  onRetry: widget.onLoadMore,
                 );
               }
               return widget.itemBuilder(context, paged.items[itemIndex]);
@@ -156,6 +158,8 @@ class _Footer extends StatelessWidget {
     required this.hasMore,
     required this.loaded,
     required this.total,
+    required this.error,
+    required this.onRetry,
   });
 
   final bool loadingMore;
@@ -163,9 +167,34 @@ class _Footer extends StatelessWidget {
   final int loaded;
   final int total;
 
+  /// 加载下一页失败时的错误（展示后可点击重试）。
+  final Object? error;
+  final Future<void> Function() onRetry;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (!loadingMore && error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          children: [
+            Text(
+              '加载失败：$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.error),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
     final Widget child;
     if (loadingMore) {
       child = const SizedBox(

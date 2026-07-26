@@ -49,13 +49,9 @@ class _CertListPageState extends ConsumerState<CertListPage> {
     }
   }
 
-  Future<void> _loadMore() async {
-    try {
-      await ref.read(certListProvider.notifier).loadMore();
-    } catch (e) {
-      if (mounted) showErrorSnack(context, e);
-    }
-  }
+  Future<void> _loadMore() =>
+      // 失败会记录到 state.loadMoreError，由列表底部展示并可重试。
+      ref.read(certListProvider.notifier).loadMore();
 
   Future<void> _refreshAll() async {
     ref.invalidate(certOptionsProvider);
@@ -269,6 +265,8 @@ class _CertListPageState extends ConsumerState<CertListPage> {
                     loading: state.loadingMore,
                     hasMore: state.hasMore,
                     total: state.total,
+                    error: state.loadMoreError,
+                    onRetry: _loadMore,
                   );
                 }
                 final cert = state.items[index];
@@ -310,15 +308,42 @@ class _ListFooter extends StatelessWidget {
     required this.loading,
     required this.hasMore,
     required this.total,
+    required this.error,
+    required this.onRetry,
   });
 
   final bool loading;
   final bool hasMore;
   final int total;
 
+  /// 加载下一页失败时的错误（展示后可点击重试）。
+  final Object? error;
+  final VoidCallback onRetry;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (!loading && error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          children: [
+            Text(
+              '加载失败：$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.error),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Center(

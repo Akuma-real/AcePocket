@@ -277,7 +277,7 @@ class _ListFooter extends StatelessWidget {
 
   final bool hasMore;
   final bool loadingMore;
-  final String? error;
+  final Object? error;
   final int count;
   final VoidCallback onRetry;
 
@@ -290,7 +290,7 @@ class _ListFooter extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              error!,
+              '$error',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
