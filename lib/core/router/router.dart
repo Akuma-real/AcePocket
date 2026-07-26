@@ -272,21 +272,80 @@ final StatefulShellRoute _shellRoute = StatefulShellRoute.indexedStack(
 );
 
 /// 底部导航外壳：三个 tab 各自保留独立导航栈（IndexedStack）。
-class _MainShell extends StatelessWidget {
+///
+/// 切换 tab 不会产生可回退的路由（goBranch 是切换分支而非压栈），因此系统返回
+/// 手势/返回键在非首个 tab 上会直接退出应用。这里维护一份 tab 访问历史，
+/// 返回时先逐个回到上一个访问过的 tab，只有回到栈底 tab 时才交给系统退出。
+class _MainShell extends StatefulWidget {
   const _MainShell({required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
+  @override
+  State<_MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<_MainShell> {
+  /// tab 访问历史，末位为当前 tab，栈底为进入应用时所在的 tab。
+  final List<int> _history = <int>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _history.add(widget.navigationShell.currentIndex);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncHistory();
+  }
+
+  /// 以 navigationShell 的实际分支下标为准同步历史。
+  ///
+  /// 分支可能由底部导航之外的方式切换——「更多」页里指向 tab 的入口用的是
+  /// `context.go`，重定向守卫也会改变分支——所以不能只在点击回调里记录。
+  /// 已访问过的 tab 会被移到末位，避免历史无限增长。
+  void _syncHistory() {
+    final index = widget.navigationShell.currentIndex;
+    if (_history.isEmpty) {
+      _history.add(index);
+      return;
+    }
+    if (_history.last == index) return;
+    setState(() {
+      _history
+        ..remove(index)
+        ..add(index);
+    });
+  }
+
   void _onDestinationSelected(int index) {
     // 再次点击当前 tab 时回到该 tab 的栈底。
-    navigationShell.goBranch(
+    widget.navigationShell.goBranch(
       index,
-      initialLocation: index == navigationShell.currentIndex,
+      initialLocation: index == widget.navigationShell.currentIndex,
     );
+  }
+
+  void _handlePop(bool didPop, Object? result) {
+    if (didPop || _history.length <= 1) return;
+    setState(() => _history.removeLast());
+    widget.navigationShell.goBranch(_history.last);
   }
 
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      // 仅当已回到栈底 tab 时才放行系统返回（退出应用）。
+      canPop: _history.length <= 1,
+      onPopInvokedWithResult: _handlePop,
+      child: _buildScaffold(),
+    );
+  }
+
+  Widget _buildScaffold() {
+    final navigationShell = widget.navigationShell;
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
