@@ -321,6 +321,17 @@ const List<MoreGroup> kMoreGroups = <MoreGroup>[
           icon: Icons.bug_report_outlined,
           path: '/panel/runtime',
           feature: PanelFeature.runtimeInfo),
+    ],
+  ),
+  // 「应用」分组管理 App 自身（本机偏好与服务器接入），
+  // 与上面管理面板服务器的「系统」分组区分。
+  MoreGroup(
+    title: '应用',
+    entries: <MoreEntry>[
+      MoreEntry(
+          label: '应用设置',
+          icon: Icons.app_settings_alt_outlined,
+          path: '/app-settings'),
       MoreEntry(label: '服务器管理', icon: Icons.dns_rounded, path: '/servers'),
       MoreEntry(label: '关于', icon: Icons.info_outline, path: '/about'),
     ],

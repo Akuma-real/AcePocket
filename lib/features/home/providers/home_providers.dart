@@ -6,6 +6,8 @@ import '../../../core/api/api_exception.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/router/router.dart';
 import '../../../core/storage/server_store.dart';
+import '../../app_settings/models/app_settings.dart';
+import '../../app_settings/providers/app_settings_providers.dart';
 import '../models/current_info.dart';
 import '../models/panel_models.dart';
 import '../models/runtime_models.dart';
@@ -152,7 +154,8 @@ class RealtimeState {
   final List<double> diskWriteHistory;
 }
 
-/// 首页实时数据轮询（3 秒一次；页面离开后自动停止）。
+/// 首页实时数据轮询（间隔可在「应用设置」中配置，默认 3 秒，可关闭；
+/// 页面离开后自动停止）。
 ///
 /// 首页 tab 常驻于 `StatefulShellRoute.indexedStack`，本 Provider 不会因
 /// 切换 tab / 压栈子页而自动释放，因此额外做两层暂停控制：
@@ -165,7 +168,8 @@ final homeRealtimeProvider =
         HomeRealtimeNotifier.new);
 
 class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
-  static const _interval = Duration(seconds: 3);
+  /// 轮询间隔（秒），来自「应用设置」（homePollIntervalProvider）；0 = 关闭轮询。
+  int _intervalSeconds = kDefaultHomePollIntervalSeconds;
 
   Timer? _timer;
   bool _fetching = false;
@@ -226,6 +230,18 @@ class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
       _syncPolling(refreshOnResume: true);
     });
 
+    // 轮询间隔来自「应用设置」。与 appForegroundProvider 同理，用 read + listen
+    // 而非 watch，避免调整间隔时重建本 Notifier（重建会清空迷你图历史）。
+    _intervalSeconds = ref.read(homePollIntervalProvider);
+    ref.listen(homePollIntervalProvider, (_, next) {
+      if (_intervalSeconds == next) return;
+      _intervalSeconds = next;
+      // 重建定时器以应用新间隔；间隔为 0（关闭）时 _syncPolling 会停表。
+      _timer?.cancel();
+      _timer = null;
+      _syncPolling(refreshOnResume: false);
+    });
+
     // 路由可见性（见 _routeVisible 的注释）：监听 GoRouter 的 routerDelegate，
     // 每次导航后根据当前匹配路径判断首页是否仍在最上层。
     final delegate = ref.read(routerProvider).routerDelegate;
@@ -252,14 +268,18 @@ class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
   /// [refreshOnResume] 为 true 时，恢复轮询的同时立即拉取一次，
   /// 让用户回到首页 / 回到前台后马上看到最新数据。
   void _syncPolling({required bool refreshOnResume}) {
-    final active = !_disposed && _appForeground && _routeVisible;
-    if (!active) {
+    final visible = !_disposed && _appForeground && _routeVisible;
+    if (!visible || _intervalSeconds <= 0) {
       _timer?.cancel();
       _timer = null;
+      // 轮询已关闭但页面可见时，回到首页 / 回到前台仍拉取一次，
+      // 保证「关闭」档位下进入页面能看到当前数据。
+      if (visible && refreshOnResume) unawaited(_tick());
       return;
     }
     if (_timer != null) return;
-    _timer = Timer.periodic(_interval, (_) => _tick());
+    _timer =
+        Timer.periodic(Duration(seconds: _intervalSeconds), (_) => _tick());
     if (refreshOnResume) unawaited(_tick());
   }
 
@@ -292,7 +312,10 @@ class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
 
     final prev = _prev;
     if (prev != null) {
-      var elapsed = _interval.inSeconds.toDouble();
+      var elapsed = (_intervalSeconds > 0
+              ? _intervalSeconds
+              : kDefaultHomePollIntervalSeconds)
+          .toDouble();
       final t1 = prev.time;
       final t2 = info.time;
       if (t1 != null && t2 != null) {

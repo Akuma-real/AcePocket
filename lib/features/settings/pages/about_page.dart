@@ -8,7 +8,6 @@ import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/panel_about.dart';
-import '../providers/appearance_providers.dart';
 import '../providers/settings_providers.dart';
 import '../widgets/setting_fields.dart';
 
@@ -24,14 +23,15 @@ const String kProjectSiteUrl = 'https://acepanel.net';
 /// API 文档地址。
 const String kProjectApiDocUrl = 'https://acepanel.net/advanced/api';
 
-/// 关于页：App / 面板版本信息、开源地址与 App 外观设置。
+/// 关于页：纯信息展示（App / 面板版本、开源地址）。
+///
+/// 外观等 App 偏好设置已移至「应用设置」（`/app-settings`）。
 class AboutPage extends ConsumerWidget {
   const AboutPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final aboutAsync = ref.watch(aboutInfoProvider);
-    final themeMode = ref.watch(appThemeModeProvider);
     final server = ref.watch(activeServerProvider);
 
     return Scaffold(
@@ -60,30 +60,15 @@ class AboutPage extends ConsumerWidget {
           children: [
             const _AppHeader(),
 
-            // -------------------------------------------------------- 外观设置
+            // ---------------------------------------------------- 应用设置入口
             SectionCard(
-              title: 'App 外观',
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              // Flutter 3.32+ 用 RadioGroup 管理分组值与变更回调。
-              child: RadioGroup<ThemeMode>(
-                groupValue: themeMode,
-                onChanged: (v) {
-                  if (v == null) return;
-                  ref.read(appThemeModeProvider.notifier).setMode(v);
-                },
-                child: Column(
-                  children: ThemeMode.values
-                      .map(
-                        (mode) => RadioListTile<ThemeMode>(
-                          value: mode,
-                          title: Text(themeModeLabel(mode)),
-                          subtitle: mode == ThemeMode.system
-                              ? const Text('随系统深色模式自动切换')
-                              : null,
-                        ),
-                      )
-                      .toList(),
-                ),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              onTap: () => context.push('/app-settings'),
+              child: const ListTile(
+                leading: Icon(Icons.app_settings_alt_outlined),
+                title: Text('应用设置'),
+                subtitle: Text('主题、启动行为、数据刷新、终端等 App 偏好'),
+                trailing: Icon(Icons.chevron_right),
               ),
             ),
 

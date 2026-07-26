@@ -16,7 +16,7 @@ import 'pages/tokens_page.dart';
 /// - `/tasks`           —— 任务中心（异步任务列表）；
 /// - `/tasks/:id`       —— 任务详情与日志；
 /// - `/logs`            —— 面板日志（操作 / 数据库 / HTTP / SSH 登录）；
-/// - `/about`           —— 关于（App 与面板版本、开源地址）+ App 外观设置。
+/// - `/about`           —— 关于（App 与面板版本信息、开源地址）。
 final List<RouteBase> settingsRoutes = [
   GoRoute(
     path: '/settings',

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/app_settings/repo/app_settings_store.dart';
+import '../../features/app_settings/routes.dart';
 import '../../features/apps/routes.dart';
 import '../../features/cert/routes.dart';
 import '../../features/container/routes.dart';
@@ -144,6 +146,7 @@ import '../widgets/error_view.dart';
 /// | `/tasks/:id`                   | 任务详情与日志 |
 /// | `/logs`                        | 面板日志 |
 /// | `/about`                       | 关于 |
+/// | `/app-settings`                | 应用设置（App 本地偏好） |
 final routerProvider = Provider<GoRouter>((ref) {
   // 服务器配置变化时让 GoRouter 重新求值 redirect。
   // 注意：这里刻意不用 ref.watch —— 重建 GoRouter 会丢失整个导航栈。
@@ -154,7 +157,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     navigatorKey: rootNavigatorKey,
-    initialLocation: '/',
+    // 启动时默认打开的 tab 由「应用设置」配置；main() 中已 await
+    // AppSettingsStore.init()，此处可同步读取。
+    initialLocation: AppSettingsStore.instance.startupTab.path,
     refreshListenable: refresh,
     redirect: (context, state) => _redirect(ref, state),
     errorBuilder: (context, state) =>
@@ -184,6 +189,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       ...migrationRoutes,
       ...panelUsersRoutes,
       ...settingsRoutes,
+      // App 本地设置（本机偏好），不依赖面板。
+      ...appSettingsRoutes,
     ],
   );
 });

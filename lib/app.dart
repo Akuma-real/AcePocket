@@ -33,7 +33,7 @@ class _AcePanelAppState extends ConsumerState<AcePanelApp> {
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
-    // 主题模式由「关于」页设置并持久化（features/settings/providers/appearance_providers.dart）。
+    // 主题模式由「应用设置」页设置并持久化（features/settings/providers/appearance_providers.dart）。
     final themeMode = ref.watch(appThemeModeProvider);
     return MaterialApp.router(
       title: 'AcePocket',
