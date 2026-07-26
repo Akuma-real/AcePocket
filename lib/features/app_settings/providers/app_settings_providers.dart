@@ -41,3 +41,21 @@ class HomePollIntervalNotifier extends Notifier<int> {
     await AppSettingsStore.instance.saveHomePollIntervalSeconds(value);
   }
 }
+
+/// 启动时自动检查应用更新。
+final autoCheckUpdateProvider =
+    NotifierProvider<AutoCheckUpdateNotifier, bool>(AutoCheckUpdateNotifier.new);
+
+class AutoCheckUpdateNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    // AppSettingsStore 在 main() 中已 init，此处可同步读取。
+    return AppSettingsStore.instance.autoCheckUpdate;
+  }
+
+  /// 更新开关并持久化。
+  Future<void> setEnabled(bool enabled) async {
+    state = enabled;
+    await AppSettingsStore.instance.saveAutoCheckUpdate(enabled);
+  }
+}

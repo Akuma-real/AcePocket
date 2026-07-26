@@ -101,4 +101,31 @@ void main() {
       expect(prefs.getInt(AppSettingsStore.homePollIntervalKey), 0);
     });
   });
+
+  group('autoCheckUpdateProvider', () {
+    test('build 同步读取 Store 中的值', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        AppSettingsStore.autoCheckUpdateKey: false,
+      });
+      await AppSettingsStore.instance.init();
+
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      expect(container.read(autoCheckUpdateProvider), isFalse);
+    });
+
+    test('setEnabled 更新 state 并持久化', () async {
+      await AppSettingsStore.instance.init();
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      expect(container.read(autoCheckUpdateProvider), isTrue);
+
+      await container.read(autoCheckUpdateProvider.notifier).setEnabled(false);
+
+      expect(container.read(autoCheckUpdateProvider), isFalse);
+      expect(AppSettingsStore.instance.autoCheckUpdate, isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(AppSettingsStore.autoCheckUpdateKey), isFalse);
+    });
+  });
 }

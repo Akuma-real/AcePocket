@@ -4,6 +4,12 @@
          release 构建必须在此显式声明，否则所有网络请求都会失败。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- 应用内更新调起系统安装器所需（open_filex 自身清单不含此权限）。
+         APK 下载到应用私有外部目录的 AcePanel/（FileProvider 已授权的唯一路径），
+         经 content URI 交给系统安装器；仅声明此权限，不申请任何存储/媒体权限，
+         遵循下方既有的权限最小化原则。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <!-- open_filex 插件的清单会 merge 进以下四个存储/媒体读取权限。
          本应用只用它打开自己下载目录（应用私有外部目录）里的文件，通过 FileProvider
          签发 content URI 即可，完全不需要读取共享存储或媒体库，这里显式移除，

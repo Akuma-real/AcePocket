@@ -1,0 +1,122 @@
+name: Release
+
+# 打 v* 标签时构建正式签名的 APK 并创建 GitHub Release。
+# App 内更新通过公开的 Release API 读取最新版本与下载地址，
+# 因此本仓库必须保持公开，且 Release 不能标记为 draft。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的标签（如 v1.0.1），需已存在'
+        required: true
+
+permissions:
+  contents: write   # 创建 Release 需要
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0   # 生成变更日志需要历史
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 校验标签与 pubspec 版本一致
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PUBSPEC_VER=$(grep -E '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
+          if [ "${TAG#v}" != "$PUBSPEC_VER" ]; then
+            echo "::error::标签 $TAG 与 pubspec.yaml 的 version ($PUBSPEC_VER) 不一致。"
+            echo "App 内更新按版本号比较，二者不一致会导致更新提示错乱。"
+            exit 1
+          fi
+          echo "版本一致：$PUBSPEC_VER"
+
+      - run: flutter analyze
+      - run: flutter test
+
+      - name: 还原签名配置
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::缺少 ANDROID_KEYSTORE_BASE64，无法产出可分发的包。"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # key.properties 由 android/app/build.gradle.kts 读取；写在 android/ 下，
+          # 该文件已被 .gitignore 排除，不会污染工作区。
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
+      # 分架构出包体积更小；同时出一个通用包便于手动安装。
+      - name: 构建 APK
+        run: |
+          flutter build apk --release --split-per-abi
+          flutter build apk --release
+
+      - name: 校验产物确为正式密钥签名
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          OUT=build/app/outputs/flutter-apk/app-release.apk
+          "$APKSIGNER" verify --print-certs "$OUT" | tee /tmp/certs.txt
+          # debug 密钥的固定 DN，出现即说明签名配置没生效
+          if grep -q "CN=Android Debug" /tmp/certs.txt; then
+            echo "::error::产物使用了 debug 密钥签名，签名配置未生效。"
+            exit 1
+          fi
+
+      - name: 生成变更日志
+        id: changelog
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
+          {
+            echo 'body<<CHANGELOG_EOF'
+            if [ -n "$PREV" ]; then
+              echo "## 自 $PREV 以来的变更"
+              echo
+              git log --no-merges --pretty='- %s' "$PREV..$TAG"
+            else
+              echo "## 首个发布版本"
+            fi
+            echo
+            echo "---"
+            echo "arm64-v8a 适用于绝大多数设备；不确定时下载 \`app-release.apk\`（通用包，体积较大）。"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false        # App 内更新读的是 /releases/latest，draft 不会出现在其中
+          prerelease: false
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+
+      - name: 清理签名材料
+        if: always()
+        run: rm -f android/key.properties "$RUNNER_TEMP/release.jks"

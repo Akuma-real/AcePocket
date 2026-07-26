@@ -142,4 +142,73 @@ void main() {
       expect(AppSettingsStore.instance.startupTab, StartupTab.more);
     });
   });
+
+  group('AppSettingsStore：应用更新偏好', () {
+    test('默认值：autoCheckUpdate=true、skippedUpdateVersion=null', () async {
+      // 未 init 时即为默认值。
+      expect(AppSettingsStore.instance.autoCheckUpdate, isTrue);
+      expect(AppSettingsStore.instance.skippedUpdateVersion, isNull);
+      // 无存储值时 init 后仍为默认值。
+      await AppSettingsStore.instance.init();
+      expect(AppSettingsStore.instance.autoCheckUpdate, isTrue);
+      expect(AppSettingsStore.instance.skippedUpdateVersion, isNull);
+    });
+
+    test('saveAutoCheckUpdate 后内存与 prefs 均更新', () async {
+      await AppSettingsStore.instance.init();
+      await AppSettingsStore.instance.saveAutoCheckUpdate(false);
+
+      expect(AppSettingsStore.instance.autoCheckUpdate, isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('app_settings.auto_check_update'), isFalse);
+    });
+
+    test('saveSkippedUpdateVersion 后内存与 prefs 均更新', () async {
+      await AppSettingsStore.instance.init();
+      await AppSettingsStore.instance.saveSkippedUpdateVersion('1.0.1');
+
+      expect(AppSettingsStore.instance.skippedUpdateVersion, '1.0.1');
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getString('app_settings.skipped_update_version'),
+        '1.0.1',
+      );
+    });
+
+    test('saveSkippedUpdateVersion(null) 会移除键', () async {
+      await AppSettingsStore.instance.init();
+      await AppSettingsStore.instance.saveSkippedUpdateVersion('1.0.1');
+      await AppSettingsStore.instance.saveSkippedUpdateVersion(null);
+
+      expect(AppSettingsStore.instance.skippedUpdateVersion, isNull);
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.containsKey(AppSettingsStore.skippedUpdateVersionKey),
+        isFalse,
+      );
+    });
+
+    test('init 从存储读回既存值', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        AppSettingsStore.autoCheckUpdateKey: false,
+        AppSettingsStore.skippedUpdateVersionKey: '1.2.3',
+      });
+      await AppSettingsStore.instance.init();
+      expect(AppSettingsStore.instance.autoCheckUpdate, isFalse);
+      expect(AppSettingsStore.instance.skippedUpdateVersion, '1.2.3');
+    });
+
+    test('save 后 reset 再 init 能读回（持久化生效）', () async {
+      await AppSettingsStore.instance.init();
+      await AppSettingsStore.instance.saveAutoCheckUpdate(false);
+      await AppSettingsStore.instance.saveSkippedUpdateVersion('2.0.0');
+
+      // 模拟应用重启：重置内存后重新 init。
+      AppSettingsStore.instance.resetForTesting();
+      expect(AppSettingsStore.instance.autoCheckUpdate, isTrue);
+      await AppSettingsStore.instance.init();
+      expect(AppSettingsStore.instance.autoCheckUpdate, isFalse);
+      expect(AppSettingsStore.instance.skippedUpdateVersion, '2.0.0');
+    });
+  });
 }

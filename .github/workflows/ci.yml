@@ -1,0 +1,41 @@
+name: CI
+
+# 每次推送与 PR 都跑静态检查与测试。不签名、不产出可分发产物，
+# 发布流程见 release.yml。
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # 本项目要求 0 error 0 warning 0 info（含 info 级废弃提示），
+      # 因此不加任何 --no-fatal-* 放宽。
+      - name: flutter analyze
+        run: flutter analyze
+
+      - name: flutter test
+        run: flutter test
+
+      # 用 debug 密钥构建，仅验证 release 构建链路可用，产物不分发。
+      - name: 构建校验（未签名）
+        run: flutter build apk --release --target-platform android-arm64

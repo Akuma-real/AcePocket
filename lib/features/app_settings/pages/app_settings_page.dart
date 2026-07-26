@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/widgets/section_card.dart';
+import '../../app_update/providers/app_update_providers.dart';
+import '../../app_update/widgets/update_dialog.dart';
 import '../../settings/providers/appearance_providers.dart';
 import '../../terminal/models/terminal_settings.dart';
 import '../../terminal/providers/terminal_providers.dart';
@@ -9,7 +11,8 @@ import '../models/app_settings.dart';
 import '../providers/app_settings_providers.dart';
 import '../widgets/pinned_cert_section.dart';
 
-/// 应用设置页：App 本地偏好（外观 / 启动行为 / 数据刷新 / 终端 / 网络与安全）。
+/// 应用设置页：App 本地偏好（外观 / 启动行为 / 数据刷新 / 终端 / 网络与安全 /
+/// 关于与更新）。
 ///
 /// 所有设置仅保存在本机，不会同步到面板服务器。
 class AppSettingsPage extends ConsumerWidget {
@@ -28,6 +31,7 @@ class AppSettingsPage extends ConsumerWidget {
           _TerminalSection(),
           // 自带「网络与安全」SectionCard 外壳，直接放置即可。
           PinnedCertSection(),
+          _AboutSection(),
         ],
       ),
     );
@@ -296,6 +300,93 @@ class _TerminalSection extends ConsumerWidget {
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「关于与更新」分区：当前版本、自动检查更新开关与手动检查入口。
+class _AboutSection extends ConsumerStatefulWidget {
+  const _AboutSection();
+
+  @override
+  ConsumerState<_AboutSection> createState() => _AboutSectionState();
+}
+
+class _AboutSectionState extends ConsumerState<_AboutSection> {
+  /// 手动检查是否进行中（防重入：检查中禁点并显示进度指示）。
+  bool _checking = false;
+
+  /// 手动触发一次更新检查（无视被跳过的版本，有新版本直接弹窗）。
+  Future<void> _checkForUpdate() async {
+    if (_checking) return;
+    setState(() => _checking = true);
+    try {
+      // AppUpdateChecker.check() 约定绝不抛异常，失败以 status 表达。
+      final result = await ref.read(appUpdateCheckerProvider).check();
+      if (!mounted) return;
+      switch (result.status) {
+        case UpdateCheckStatus.updateAvailable:
+          await showAppUpdateDialog(context, result.release!);
+        case UpdateCheckStatus.upToDate:
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已是最新版本')),
+          );
+        case UpdateCheckStatus.failed:
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('检查更新失败，请检查网络后重试')),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final version = ref.watch(currentAppVersionProvider);
+    final autoCheck = ref.watch(autoCheckUpdateProvider);
+
+    return SectionCard(
+      title: '关于与更新',
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            title: const Text('当前版本'),
+            trailing: Text(
+              version.when(
+                data: (v) => 'v$v',
+                loading: () => '…',
+                error: (_, __) => '未知',
+              ),
+            ),
+          ),
+          SwitchListTile(
+            value: autoCheck,
+            onChanged: (v) {
+              ref.read(autoCheckUpdateProvider.notifier).setEnabled(v);
+            },
+            title: const Text('启动时自动检查更新'),
+            subtitle: const Text('启动后在后台静默检查，发现新版本时提示'),
+          ),
+          ListTile(
+            title: const Text('检查更新'),
+            enabled: !_checking,
+            onTap: _checking ? null : _checkForUpdate,
+            trailing: _checking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+          ),
+          const _SectionNote(
+            '更新检查通过 GitHub Releases 进行，仅在你主动或开启自动检查时发起，不会上传任何数据。',
           ),
         ],
       ),
