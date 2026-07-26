@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/format.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -27,7 +28,8 @@ class MigrationResultsPage extends ConsumerWidget {
         title: const Text('迁移结果'),
         actions: [
           IconButton(
-            tooltip: '刷新',
+            // 读屏只念动词「刷新」分不清刷新什么，写明动作对象。
+            tooltip: '刷新迁移结果',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(migrationResultsProvider),
           ),
@@ -93,7 +95,7 @@ class MigrationResultsPage extends ConsumerWidget {
     final end = snapshot.endedAt;
     final elapsed = start == null
         ? ''
-        : ' · 用时 ${formatDuration((end ?? DateTime.now()).difference(start).inMilliseconds / 1000)}';
+        : ' · 用时 ${formatDuration((end ?? DateTime.now()).difference(start))}';
 
     return SectionCard(
       title: '概览',

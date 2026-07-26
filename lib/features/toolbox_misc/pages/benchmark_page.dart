@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
 import '../../../core/widgets/section_card.dart';
@@ -61,12 +63,20 @@ class _BenchmarkPageState extends ConsumerState<BenchmarkPage> {
     final state = ref.watch(benchmarkProvider);
     final notifier = ref.read(benchmarkProvider.notifier);
 
+    // 手动停止后给出明确回执：进度卡片消失得很快，
+    // 不提示的话用户无法确认「停止」是否真的生效。
+    ref.listen(benchmarkProvider, (previous, next) {
+      if ((previous?.running ?? false) && !next.running && next.stopped) {
+        showInfoSnack(context, '测试已停止，已完成项目的成绩已保留');
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('服务器跑分'),
         actions: [
-          IconButton(
-            tooltip: '清空成绩',
+          A11yIconButton(
+            tooltip: '清空全部跑分成绩',
             icon: const Icon(Icons.restart_alt),
             onPressed:
                 state.running || !state.hasAnyResult ? null : notifier.reset,
@@ -92,7 +102,10 @@ class _BenchmarkPageState extends ConsumerState<BenchmarkPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
                     child: Text(
-                      '最近一次跑分完成于 ${_formatTime(state.finishedAt!)}',
+                      state.stopped
+                          ? '最近一次跑分于 ${_formatTime(state.finishedAt!)} '
+                              '被手动停止，可单独重测未完成的项目'
+                          : '最近一次跑分完成于 ${_formatTime(state.finishedAt!)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -377,8 +390,9 @@ class _BenchmarkPageState extends ConsumerState<BenchmarkPage> {
           ),
           const SizedBox(width: 12),
           trailing,
-          IconButton(
-            tooltip: '单独测试',
+          A11yIconButton(
+            // 带上项目名：一页有 9 个同图标按钮，读屏只念「单独测试」没法区分。
+            tooltip: '单独测试「${test.title}」',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.play_circle_outline, size: 20),
             onPressed:

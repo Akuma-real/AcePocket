@@ -153,6 +153,12 @@ class _EnvCompareRow extends StatelessWidget {
                     : Icons.error_outline,
             size: 18,
             color: iconColor,
+            // 是否一致仅靠图标与颜色表达，读屏用户会漏掉，补语义标签。
+            semanticLabel: matched
+                ? '一致'
+                : required
+                    ? '不一致，阻断迁移'
+                    : '存在差异',
           ),
         ),
       ],

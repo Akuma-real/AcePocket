@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../models/ssh_host.dart';
 
 /// SSH 主机连接信息表单。
@@ -184,7 +185,9 @@ class _SshHostFormState extends State<SshHostForm> {
                         int.tryParse(parts.last) != null) {
                       return '端口请填到右侧输入框';
                     }
-                    return null;
+                    // 其余情况交给通用校验：裸主机名或 IP（IPv4 / IPv6 均可），
+                    // SSH 地址不是网站，不允许泛域名。
+                    return validateDomain(text, allowWildcard: false);
                   },
                 ),
               ),
@@ -202,9 +205,13 @@ class _SshHostFormState extends State<SshHostForm> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
-                    final port = int.tryParse((value ?? '').trim());
-                    if (port == null) return '请输入端口';
-                    if (port < 1 || port > 65535) return '需在 1-65535 之间';
+                    final text = (value ?? '').trim();
+                    if (text.isEmpty) return '请输入端口，如 22';
+                    final port = int.tryParse(text);
+                    if (port == null) return '端口应为数字，如 22';
+                    if (port < 1 || port > 65535) {
+                      return '端口需在 1-65535 之间';
+                    }
                     return null;
                   },
                 ),
@@ -240,8 +247,13 @@ class _SshHostFormState extends State<SshHostForm> {
               hintText: 'root',
               border: OutlineInputBorder(),
             ),
-            validator: (value) =>
-                (value ?? '').trim().isEmpty ? '请输入用户名' : null,
+            validator: (value) {
+              final text = (value ?? '').trim();
+              if (text.isEmpty) return '请输入用户名';
+              // SSH 登录用户名不含空白字符，多为整串粘贴时带入。
+              if (text.contains(RegExp(r'\s'))) return '用户名不能包含空格';
+              return null;
+            },
           ),
           const SizedBox(height: 16),
           if (!isKey)

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/a11y.dart';
 
 /// 校验是否为合法 IP（IPv4 / IPv6），面板对 DNS 有 `ip` 校验。
@@ -417,10 +418,10 @@ class _DnsEditDialogState extends State<_DnsEditDialog> {
     super.dispose();
   }
 
+  /// 复用 core 的 IP 校验：文案会指出正确形态（如 192.0.2.1 / 2001:db8::1）。
   String? _validate(String value) {
     if (value.isEmpty) return '请填写 DNS 服务器地址';
-    if (!isIpAddress(value)) return '请输入合法的 IPv4 / IPv6 地址';
-    return null;
+    return validateIpAddress(value);
   }
 
   void _submit() {

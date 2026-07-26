@@ -68,13 +68,5 @@ String formatDateTime(DateTime? time) {
       '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
 }
 
-/// 格式化耗时（秒）。
-String formatDuration(double seconds) {
-  if (seconds <= 0) return '-';
-  if (seconds < 60) return '${seconds.toStringAsFixed(1)} 秒';
-  final minutes = seconds ~/ 60;
-  final rest = seconds - minutes * 60;
-  if (minutes < 60) return '$minutes 分 ${rest.toStringAsFixed(0)} 秒';
-  final hours = minutes ~/ 60;
-  return '$hours 小时 ${minutes % 60} 分';
-}
+// 耗时格式化不再在此处自制：统一使用 core/utils/format.dart 的
+// formatDuration(Duration)，避免各模块维护互不一致的实现。

@@ -8,6 +8,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/app_snack.dart';
 import '../../app_settings/repo/app_settings_store.dart';
 import '../models/app_update_models.dart';
 import '../repo/apk_installer.dart';
@@ -92,11 +94,11 @@ String _cleanChangelog(String body) {
   return cleaned.join('\n').trim();
 }
 
-/// 下载流程：选资产 → 进度对话框下载 → 安装；失败原因走 SnackBar。
+/// 下载流程：选资产 → 进度对话框下载 → 安装；失败原因统一走 showErrorSnack。
 Future<void> _startDownload(BuildContext context, AppRelease release) async {
   final asset = selectApkAsset(release.assets, preferArm64: isArm64Runtime());
   if (asset == null) {
-    _showSnackBar(context, '未找到可用的安装包');
+    showErrorSnack(context, '未找到可用的安装包');
     return;
   }
   final result = await showDialog<_DownloadResult>(
@@ -110,18 +112,13 @@ Future<void> _startDownload(BuildContext context, AppRelease release) async {
       // 用户主动取消，静默。
       break;
     case _DownloadResultKind.failed:
-      _showSnackBar(context, '下载失败：${result.message}');
+      showErrorSnack(context, '下载失败：${result.message}');
     case _DownloadResultKind.success:
       final error = await ApkInstaller().install(result.apkPath!);
       if (error != null && context.mounted) {
-        _showSnackBar(context, error);
+        showErrorSnack(context, error);
       }
   }
-}
-
-void _showSnackBar(BuildContext context, String message) {
-  ScaffoldMessenger.maybeOf(context)
-      ?.showSnackBar(SnackBar(content: Text(message)));
 }
 
 enum _DownloadResultKind { success, cancelled, failed }
@@ -204,9 +201,6 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
     }
   }
 
-  String _formatMb(int bytes) =>
-      (bytes / (1024 * 1024)).toStringAsFixed(1);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -223,9 +217,11 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
             LinearProgressIndicator(value: progress),
             const SizedBox(height: 12),
             Text(
+              // 体积 / 百分比统一走 core/utils/format.dart，不再本地换算 MB。
               hasTotal
-                  ? '${(progress! * 100).toStringAsFixed(0)}%'
-                      '（${_formatMb(_received)} MB / ${_formatMb(_total)} MB）'
+                  ? '${formatPercent(progress! * 100, fractionDigits: 0)}'
+                      '（${formatBytes(_received, fractionDigits: 1)} / '
+                      '${formatBytes(_total, fractionDigits: 1)}）'
                   : '正在下载…',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,

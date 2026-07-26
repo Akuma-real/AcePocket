@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/utils/format.dart';
 import '../../../core/utils/url_validation.dart';
 import '../../../core/version/panel_feature.dart';
 import '../../../core/widgets/a11y.dart';
@@ -630,9 +631,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     final start = state.startedAt;
     if (start == null) return '';
     final end = state.endedAt ?? DateTime.now();
-    final seconds = end.difference(start).inMilliseconds / 1000;
-    if (seconds <= 0) return '';
-    return ' · 用时 ${formatDuration(seconds)}';
+    final elapsed = end.difference(start);
+    if (elapsed <= Duration.zero) return '';
+    return ' · 用时 ${formatDuration(elapsed)}';
   }
 
   /// WebSocket 会话认证失败：引导用户去服务器配置补填面板账号密码。

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
+import '../../../core/widgets/unsaved_guard.dart';
 import '../providers/toolbox_misc_providers.dart';
 import '../widgets/toolbox_tiles.dart';
 
@@ -90,28 +92,17 @@ class _HostsEditorPageState extends ConsumerState<HostsEditorPage> {
     final theme = Theme.of(context);
     final content = ref.watch(hostsContentProvider);
 
-    return PopScope(
-      canPop: !_dirty,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || !_dirty) return;
-        final navigator = Navigator.of(context);
-        final leave = await showConfirmDialog(
-          context,
-          title: '放弃未保存的修改？',
-          content: 'hosts 内容已修改但尚未保存。',
-          confirmText: '放弃',
-          danger: true,
-        );
-        if (leave && mounted) {
-          navigator.pop();
-        }
-      },
+    // 未保存拦截统一交给 core 的 UnsavedChangesGuard：
+    // AppBar 返回箭头（走 maybePop）与系统返回手势 / 返回键行为一致。
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      message: 'hosts 内容已修改但尚未保存，放弃后无法恢复。',
       child: Scaffold(
         appBar: AppBar(
           title: const Text('hosts 文件'),
           actions: [
-            IconButton(
-              tooltip: '重新读取',
+            A11yIconButton(
+              tooltip: '重新读取 hosts 文件',
               icon: const Icon(Icons.refresh),
               onPressed: _saving ? null : _reload,
             ),

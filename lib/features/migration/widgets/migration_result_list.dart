@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/format.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/json_utils.dart';
 import '../models/migration_status.dart';
@@ -112,7 +113,8 @@ class MigrationResultTile extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 '${result.status.label}'
-                '${result.duration > 0 ? ' · 耗时 ${formatDuration(result.duration)}' : ''}'
+                // 面板返回的耗时是秒（double），换算成 Duration 走统一格式化。
+                '${result.duration > 0 ? ' · 耗时 ${formatDuration(Duration(milliseconds: (result.duration * 1000).round()))}' : ''}'
                 '${result.endedAt != null ? ' · 结束于 ${formatDateTime(result.endedAt)}' : ''}',
                 style: theme.textTheme.bodySmall?.copyWith(color: color),
               ),

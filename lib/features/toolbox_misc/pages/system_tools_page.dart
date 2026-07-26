@@ -516,9 +516,11 @@ class _SystemToolsPageState extends ConsumerState<SystemToolsPage> {
         helperText: '只能包含字母、数字与短横线，且不能以短横线开头或结尾',
         validator: (v) {
           if (v.isEmpty) return '请输入主机名';
-          final ok =
-              RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]$').hasMatch(v);
-          return ok ? null : '主机名格式不合法';
+          if (v.length > 63) return '主机名过长（最多 63 个字符）';
+          // 允许单字符主机名：首尾字母数字，中间可含短横线。
+          final ok = RegExp(r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$')
+              .hasMatch(v);
+          return ok ? null : '主机名只能包含字母、数字与短横线，且不能以短横线开头或结尾';
         },
       );
       if (value == null || value == hostname || !mounted) return;

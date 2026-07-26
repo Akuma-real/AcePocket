@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/panel_http_client.dart';
 import '../../../core/models/server.dart';
 import '../../../core/utils/url_validation.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/connection_test.dart';
 import '../providers/servers_providers.dart';
@@ -364,22 +365,25 @@ class _ServerFormState extends ConsumerState<ServerForm> {
             borderRadius: BorderRadius.circular(8),
             onTap:
                 _busy ? null : () => setState(() => _showAdvanced = !_showAdvanced),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    _showAdvanced ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '高级选项（访问入口、面板账号）',
-                    style: theme.textTheme.labelLarge
-                        ?.copyWith(color: colorScheme.primary),
-                  ),
-                ],
+            // 原行高约 36dp，不足 48dp 触摸目标下限；只扩命中区域不改视觉。
+            child: minTouchTarget(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      _showAdvanced ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '高级选项（访问入口、面板账号）',
+                      style: theme.textTheme.labelLarge
+                          ?.copyWith(color: colorScheme.primary),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

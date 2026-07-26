@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/utils/format.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/feature_gate.dart';
@@ -100,8 +101,8 @@ class _LogCleanPageState extends ConsumerState<LogCleanPage> {
       appBar: AppBar(
         title: const Text('日志清理'),
         actions: [
-          IconButton(
-            tooltip: '重新扫描',
+          A11yIconButton(
+            tooltip: '重新扫描全部日志',
             icon: const Icon(Icons.refresh),
             onPressed: anyBusy ? null : notifier.scanAll,
           ),

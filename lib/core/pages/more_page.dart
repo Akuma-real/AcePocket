@@ -8,6 +8,7 @@ import '../usage/more_usage_providers.dart';
 import '../usage/more_usage_store.dart';
 import '../version/panel_feature.dart';
 import '../version/panel_version_provider.dart';
+import '../widgets/a11y.dart';
 import '../widgets/section_card.dart';
 import 'more_page_search.dart';
 
@@ -467,7 +468,8 @@ class _MorePageState extends ConsumerState<MorePage> {
           suffixIcon: _query.isEmpty
               ? null
               : IconButton(
-                  tooltip: '清空',
+                  // 读屏只念动词「清空」分不清清空什么，写明动作对象。
+                  tooltip: '清空搜索词',
                   icon: const Icon(Icons.clear_rounded),
                   onPressed: () {
                     _searchController.clear();
@@ -726,22 +728,25 @@ class _ActiveServerCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               onTap: () => context
                   .push('/servers/edit?id=${server!.id}&advanced=1'),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline,
-                        size: 16, color: colorScheme.tertiary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '未填写面板登录账号，终端 / 实时日志 / 证书签发日志不可用，点此补填',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
+              // 原行高约 24dp，不足 48dp 触摸目标下限；只扩命中区域不改视觉。
+              child: minTouchTarget(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline,
+                          size: 16, color: colorScheme.tertiary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '未填写面板登录账号，终端 / 实时日志 / 证书签发日志不可用，点此补填',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -772,15 +777,20 @@ class _EntryGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 固定 childAspectRatio 的格子高度不随系统字号变化，200% 字号下
+    // 标题与版本徽标会被垂直裁切。改用与文字尺寸联动的固定主轴高度：
+    // 图标(42) + 间距(6+2) + 一行标题 + 一行徽标，文字部分随 textScaler 缩放。
+    final textScaler = MediaQuery.textScalerOf(context);
+    final tileExtent = 50 + textScaler.scale(16) + textScaler.scale(15);
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 4,
         mainAxisSpacing: 8,
         crossAxisSpacing: 8,
-        childAspectRatio: 0.92,
+        mainAxisExtent: tileExtent,
       ),
       itemCount: entries.length,
       itemBuilder: (context, index) {

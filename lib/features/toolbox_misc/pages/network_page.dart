@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_exception.dart';
 import '../../../core/version/panel_feature.dart';
+import '../../../core/widgets/a11y.dart';
 import '../../../core/widgets/app_snack.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -43,6 +45,10 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
 
   void _onScroll() {
     if (!_controller.hasClients) return;
+    // 上次加载更多失败时不再自动触发，避免停在列表底部反复重试；
+    // 由底部的「重试」按钮显式重发。
+    final paged = ref.read(networkConnectionsProvider).valueOrNull;
+    if (paged == null || paged.loadMoreError != null) return;
     final position = _controller.position;
     if (position.pixels >= position.maxScrollExtent - 240) {
       ref.read(networkConnectionsProvider.notifier).loadMore();
@@ -75,8 +81,8 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
       appBar: AppBar(
         title: const Text('网络信息'),
         actions: [
-          IconButton(
-            tooltip: '筛选与排序',
+          A11yIconButton(
+            tooltip: '筛选与排序连接列表',
             icon: Badge(
               isLabelVisible: filter.activeCount > 0,
               label: Text('${filter.activeCount}'),
@@ -84,8 +90,8 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
             ),
             onPressed: _openFilter,
           ),
-          IconButton(
-            tooltip: '刷新',
+          A11yIconButton(
+            tooltip: '刷新连接列表',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.invalidate(networkConnectionsProvider),
           ),
@@ -177,6 +183,8 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
 
     final paged = state.requireValue;
     if (paged.items.isEmpty) {
+      // 空态区分「筛选后无结果」与「本来就没有连接」，前者给出清空筛选入口。
+      final hasFilter = ref.read(networkFilterProvider).activeCount > 0;
       return RefreshIndicator(
         onRefresh: _refresh,
         child: LayoutBuilder(
@@ -184,9 +192,20 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
             physics: const AlwaysScrollableScrollPhysics(),
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: const EmptyView(
-                message: '没有符合条件的连接',
+              child: EmptyView(
+                message: hasFilter
+                    ? '没有符合筛选条件的连接，试试放宽或清空筛选条件'
+                    : '当前没有 TCP / UDP 连接记录，下拉可重新读取',
                 icon: Icons.lan_outlined,
+                action: hasFilter
+                    ? OutlinedButton.icon(
+                        onPressed: () => ref
+                            .read(networkFilterProvider.notifier)
+                            .state = const NetworkFilter(),
+                        icon: const Icon(Icons.filter_alt_off_outlined),
+                        label: const Text('清空筛选条件'),
+                      )
+                    : null,
               ),
             ),
           ),
@@ -310,6 +329,27 @@ class _NetworkPageState extends ConsumerState<NetworkPage> {
     final Widget child;
     if (paged.loadingMore) {
       child = const BusyIndicator();
+    } else if (paged.loadMoreError != null) {
+      // 加载更多失败：基建把错误记在 loadMoreError 里，这里展示并提供重试。
+      child = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '加载更多失败：${describeError(paged.loadMoreError!)}',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: () =>
+                ref.read(networkConnectionsProvider.notifier).loadMore(),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('重试'),
+          ),
+        ],
+      );
     } else if (paged.hasMore) {
       child = TextButton(
         onPressed: () =>
