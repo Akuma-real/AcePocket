@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/api/ws_client.dart';
+import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/models/server.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/migration_connection.dart';
@@ -239,11 +240,34 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
   Timer? _reconnectTimer;
   bool _disposed = false;
 
+  /// 应用是否处于前台。后台时暂停 WS 重连尝试与 HTTP 轮询兜底
+  /// （已建立的 WS 连接保留，由服务端推送，客户端无定时开销）。
+  bool _appForeground = true;
+
+  /// 后台期间被推迟的 WS 重连，回前台后立即补一次。
+  bool _reconnectPending = false;
+
+  /// 后台期间被暂停的 HTTP 轮询，回前台后恢复定时并立即拉一次。
+  bool _pollPaused = false;
+
   @override
   MigrationFlowState build() {
     _repo = ref.watch(migrationRepoProvider);
     _server = ref.watch(activeServerProvider);
     _disposed = false;
+    _reconnectPending = false;
+    _pollPaused = false;
+    // 用 ref.listen 而非 ref.watch：切前后台不应重建整个迁移向导状态。
+    _appForeground = ref.read(appForegroundProvider);
+    ref.listen(appForegroundProvider, (_, next) {
+      if (_appForeground == next) return;
+      _appForeground = next;
+      if (next) {
+        _onForeground();
+      } else {
+        _onBackground();
+      }
+    });
     ref.onDispose(() {
       _disposed = true;
       _closeChannel();
@@ -251,6 +275,35 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
       _reconnectTimer?.cancel();
     });
     return const MigrationFlowState();
+  }
+
+  /// 切后台：取消尚未触发的重连 / 轮询定时器，记下待恢复标记。
+  void _onBackground() {
+    if (_reconnectTimer != null) {
+      _reconnectTimer!.cancel();
+      _reconnectTimer = null;
+      _reconnectPending = true;
+    }
+    if (_pollTimer != null) {
+      _pollTimer!.cancel();
+      _pollTimer = null;
+      _pollPaused = true;
+    }
+  }
+
+  /// 回前台：迁移仍在进行时立即补一次重连；轮询兜底恢复定时并立即拉一次。
+  void _onForeground() {
+    if (_disposed) return;
+    if (_reconnectPending) {
+      _reconnectPending = false;
+      if (state.stage == MigrationStage.running) {
+        unawaited(_startProgressStream());
+      }
+    }
+    if (_pollPaused) {
+      _pollPaused = false;
+      if (state.polling) _resumePollTimer();
+    }
   }
 
   // ------------------------------------------------------------------ 初始化
@@ -294,6 +347,8 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
             _closeChannel();
             _stopPolling();
             _reconnectTimer?.cancel();
+            _reconnectTimer = null;
+            _reconnectPending = false;
           }
           state = state.copyWith(
             initializing: false,
@@ -538,6 +593,7 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
 
   Future<void> _startProgressStream() async {
     _reconnectTimer?.cancel();
+    _reconnectPending = false;
     _closeChannel();
     final server = _server;
     if (server == null) {
@@ -623,6 +679,12 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
     state = state.copyWith(live: false);
     if (state.stage == MigrationStage.running) {
       _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      if (!_appForeground) {
+        // 后台不重连，回前台后由 _onForeground 立即补一次。
+        _reconnectPending = true;
+        return;
+      }
       _reconnectTimer = Timer(_reconnectDelay, () {
         if (_disposed || state.stage != MigrationStage.running) return;
         unawaited(_startProgressStream());
@@ -634,8 +696,19 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
 
   /// WebSocket 不可用时的兜底：定时拉取 `/results`。
   void _startPolling() {
-    if (_pollTimer != null) return;
+    if (_pollTimer != null || _pollPaused) return;
     state = state.copyWith(polling: true);
+    if (!_appForeground) {
+      // 后台不起轮询定时器，回前台后由 _onForeground 恢复。
+      _pollPaused = true;
+      return;
+    }
+    _resumePollTimer();
+  }
+
+  /// 创建轮询定时器并立即拉取一次（首次启动与回前台恢复共用）。
+  void _resumePollTimer() {
+    if (_pollTimer != null) return;
     unawaited(loadResults());
     _pollTimer = Timer.periodic(_pollInterval, (_) async {
       if (_disposed) return;
@@ -647,6 +720,7 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
+    _pollPaused = false;
     if (!_disposed && state.polling) state = state.copyWith(polling: false);
   }
 
@@ -668,6 +742,8 @@ class MigrationFlowNotifier extends Notifier<MigrationFlowState> {
       _closeChannel();
       _stopPolling();
       _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _reconnectPending = false;
       state = MigrationFlowState(
         initializing: false,
         connection: state.connection.copyWith(token: ''),

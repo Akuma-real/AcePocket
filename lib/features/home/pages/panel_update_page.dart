@@ -125,10 +125,27 @@ class _PanelUpdatePageState extends ConsumerState<PanelUpdatePage> {
       return;
     }
 
+    // 重试时先关掉上一次可能残留的连接与订阅，避免旧 channel 泄漏。
+    _subscription?.cancel();
+    _subscription = null;
+    _channel?.sink.close();
+    _channel = null;
+
     _append(UpgradeLogLevel.info, '正在连接面板实时通道…');
     try {
       final channel = await wsConnect(server, '/ws/panel/update');
+      // 连接 /ws/panel/update 即触发面板升级。建连期间用户可能已退出页面
+      // （此时 _channel 仍为 null，dispose 关不到这条连接），必须在此立即
+      // 关闭，避免泄漏的连接在后台持续接收升级日志。
+      if (!mounted) {
+        channel.sink.close();
+        return;
+      }
       await channel.ready;
+      if (!mounted) {
+        channel.sink.close();
+        return;
+      }
       _channel = channel;
       _append(UpgradeLogLevel.info, '已连接，面板开始执行升级');
 

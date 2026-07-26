@@ -131,12 +131,29 @@ class _CertObtainPageState extends ConsumerState<CertObtainPage> {
       return;
     }
 
+    // 重试时先关掉上一次可能残留的连接与订阅，避免旧 channel 泄漏。
+    _subscription?.cancel();
+    _subscription = null;
+    _channel?.sink.close();
+    _channel = null;
+
     final path = widget.renew ? '/ws/cert/renew' : '/ws/cert/obtain';
     _append(_LogLevel.info, '正在连接面板实时通道…');
 
     try {
       final channel = await wsConnect(server, path);
+      // 建连最长可等十余秒，期间用户可能已退出页面（此时 _channel 仍为 null，
+      // dispose 关不到这条连接）。必须在发送签发指令之前检查并关闭，
+      // 否则会在用户以为已取消的情况下触发面板侧的签发 / 续签任务。
+      if (!mounted) {
+        channel.sink.close();
+        return;
+      }
       await channel.ready;
+      if (!mounted) {
+        channel.sink.close();
+        return;
+      }
       _channel = channel;
       channel.sink.add(jsonEncode({'id': widget.certId}));
       _append(_LogLevel.info, widget.renew ? '已提交续签请求' : '已提交签发请求');

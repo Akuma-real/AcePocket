@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/lifecycle/app_lifecycle.dart';
+import '../../../core/router/router.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/current_info.dart';
 import '../models/panel_models.dart';
@@ -151,6 +153,13 @@ class RealtimeState {
 }
 
 /// 首页实时数据轮询（3 秒一次；页面离开后自动停止）。
+///
+/// 首页 tab 常驻于 `StatefulShellRoute.indexedStack`，本 Provider 不会因
+/// 切换 tab / 压栈子页而自动释放，因此额外做两层暂停控制：
+/// - 应用切后台 / 锁屏（[appForegroundProvider] 为 false）时暂停定时器；
+/// - 当前路由不是首页（切到其他 tab 或压栈了任何页面）时暂停定时器。
+///
+/// 恢复（回前台且回到首页）时立即拉取一次并重启定时。
 final homeRealtimeProvider =
     AsyncNotifierProvider.autoDispose<HomeRealtimeNotifier, RealtimeState>(
         HomeRealtimeNotifier.new);
@@ -161,6 +170,19 @@ class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
   Timer? _timer;
   bool _fetching = false;
   bool _disposed = false;
+
+  /// 应用是否处于前台（resumed）。
+  bool _appForeground = true;
+
+  /// 首页 tab 是否可见。
+  ///
+  /// 判断依据：路由可见性——GoRouter 当前匹配路径为 `/`（首页分支的根路由）
+  /// 时首页才在最上层。切到「网站」「更多」tab、在任意 tab 内压栈子页、
+  /// push 顶层全屏路由时，匹配路径都会变为其他值，且此时首页要么被
+  /// IndexedStack 置为 Offstage、要么被不透明路由完全遮挡，均无需刷新。
+  /// 不用 TickerMode.of(context) 是因为那需要在页面 Widget 里上报，
+  /// 而路由可见性可完全在 Provider 内监听 routerDelegate 实现。
+  bool _routeVisible = true;
 
   // 上一次采样的累计值，用于差分计算速率。
   CurrentInfo? _prev;
@@ -194,10 +216,51 @@ class HomeRealtimeNotifier extends AutoDisposeAsyncNotifier<RealtimeState> {
       _timer = null;
     });
 
-    _timer = Timer.periodic(_interval, (_) => _tick());
+    // 应用前后台切换：后台暂停轮询，回前台立即拉一次并恢复。
+    // 用 ref.listen 而非 ref.watch，避免每次切换都重建本 Notifier
+    // （重建会清空迷你图历史）。
+    _appForeground = ref.read(appForegroundProvider);
+    ref.listen(appForegroundProvider, (_, next) {
+      if (_appForeground == next) return;
+      _appForeground = next;
+      _syncPolling(refreshOnResume: true);
+    });
+
+    // 路由可见性（见 _routeVisible 的注释）：监听 GoRouter 的 routerDelegate，
+    // 每次导航后根据当前匹配路径判断首页是否仍在最上层。
+    final delegate = ref.read(routerProvider).routerDelegate;
+    bool homeOnTop() => delegate.currentConfiguration.uri.path == '/';
+    void syncRouteVisible() {
+      final visible = homeOnTop();
+      if (_routeVisible == visible) return;
+      _routeVisible = visible;
+      _syncPolling(refreshOnResume: true);
+    }
+
+    _routeVisible = homeOnTop();
+    delegate.addListener(syncRouteVisible);
+    ref.onDispose(() => delegate.removeListener(syncRouteVisible));
+
+    _syncPolling(refreshOnResume: false);
 
     final info = await repo.current();
     return _merge(info);
+  }
+
+  /// 按当前可见性开启 / 暂停轮询定时器。
+  ///
+  /// [refreshOnResume] 为 true 时，恢复轮询的同时立即拉取一次，
+  /// 让用户回到首页 / 回到前台后马上看到最新数据。
+  void _syncPolling({required bool refreshOnResume}) {
+    final active = !_disposed && _appForeground && _routeVisible;
+    if (!active) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+    if (_timer != null) return;
+    _timer = Timer.periodic(_interval, (_) => _tick());
+    if (refreshOnResume) unawaited(_tick());
   }
 
   /// 手动立即刷新一次（下拉刷新用）。

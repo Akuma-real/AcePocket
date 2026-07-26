@@ -8,6 +8,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/ws_client.dart';
+import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/storage/server_store.dart';
 import '../models/terminal_messages.dart';
 import '../models/terminal_session_spec.dart';
@@ -137,6 +138,10 @@ class TerminalSessionController
   bool _disposed = false;
   bool _autoReconnected = false;
 
+  /// 应用是否处于前台。后台时只暂停心跳定时器（不断开 WebSocket 连接，
+  /// 保证用户切回来终端会话仍然可用）。
+  bool _appForeground = true;
+
   int _columns = 80;
   int _rows = 24;
 
@@ -149,6 +154,21 @@ class TerminalSessionController
     ref.watch(activeServerProvider);
     // 重建（服务器切换）会先触发 onDispose 的 _teardown，这里恢复可用标记。
     _disposed = false;
+
+    // 应用前后台切换：后台只停心跳 ping（连接本身保留）；回前台立即补发
+    // 一次 ping 并重置 pong 超时计时（_startPing 会把 _lastPongAt 重置为
+    // 当前时刻），避免后台期间收不到 pong 而在恢复瞬间被误判为断线。
+    // 用 ref.listen 而非 ref.watch，避免切前后台导致会话重建（重建会断线）。
+    _appForeground = ref.read(appForegroundProvider);
+    ref.listen(appForegroundProvider, (_, next) {
+      if (_appForeground == next) return;
+      _appForeground = next;
+      if (next) {
+        if (_ready) _startPing();
+      } else {
+        _stopPing();
+      }
+    });
     _terminal ??= Terminal(
       maxLines: ref.read(terminalSettingsProvider).scrollback,
       onOutput: _sendInput,
@@ -467,6 +487,8 @@ class TerminalSessionController
   void _startPing() {
     _stopPing();
     if (!arg.supportsPing) return;
+    // 后台不起心跳（连接期间恰好在后台时由回前台的监听补起）。
+    if (!_appForeground) return;
     _lastPongAt = DateTime.now();
     _pingTimer = Timer.periodic(_pingInterval, (_) => _sendPing());
     _sendPing();
