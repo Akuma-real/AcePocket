@@ -54,3 +54,8 @@ app.*.map.json
 *.apk
 *.aab
 *.ipa
+
+# 发布签名：密钥与口令绝不入库
+android/key.properties
+*.jks
+*.keystore

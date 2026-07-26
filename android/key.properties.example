@@ -1,0 +1,20 @@
+# 发布签名配置模板。
+#
+# 复制为 android/key.properties 后填入真实值。该文件与 keystore 本体
+# 都已在 .gitignore 中排除，绝对不要提交到版本库。
+#
+# 生成 keystore（在仓库之外的目录执行，例如 ~/keystores/）：
+#
+#   keytool -genkeypair -v \
+#     -keystore ~/keystores/acepocket.jks \
+#     -alias acepocket \
+#     -keyalg RSA -keysize 4096 -validity 10000
+#
+# storeFile 用绝对路径，或相对于 android/ 目录的相对路径。
+# storePassword 与 keyPassword 在上面的命令中可以设为同一个（keytool 询问
+# key 口令时直接回车即沿用 store 口令）。
+
+storeFile=/home/你的用户名/keystores/acepocket.jks
+storePassword=你设置的口令
+keyAlias=acepocket
+keyPassword=你设置的口令
