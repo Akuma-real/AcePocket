@@ -104,7 +104,15 @@ class ShowHiddenFilesNotifier extends Notifier<bool> {
 
 /// 应用内文件剪贴板（复制 / 剪切待粘贴的条目）。
 class FileClipboard {
-  const FileClipboard({required this.paths, required this.isMove});
+  const FileClipboard({
+    required this.serverId,
+    required this.paths,
+    required this.isMove,
+  });
+
+  /// 来源服务器 id：剪贴板内容只允许粘贴回同一台服务器，
+  /// 防止把 A 服务器的路径下发给 B 执行。
+  final String serverId;
 
   /// 源文件完整路径列表。
   final List<String> paths;
@@ -119,10 +127,21 @@ final fileClipboardProvider =
 
 class FileClipboardNotifier extends Notifier<FileClipboard?> {
   @override
-  FileClipboard? build() => null;
+  FileClipboard? build() {
+    // watch 服务器 id：切换服务器时本 provider 重建，剪贴板自动清空，
+    // 杜绝跨服务器残留（粘贴处另有 serverId 校验兜底）。
+    ref.watch(activeServerProvider.select((s) => s?.id));
+    return null;
+  }
 
   void set(List<String> paths, {required bool isMove}) {
-    state = FileClipboard(paths: List.unmodifiable(paths), isMove: isMove);
+    final serverId = ref.read(activeServerProvider)?.id;
+    if (serverId == null || serverId.isEmpty) return;
+    state = FileClipboard(
+      serverId: serverId,
+      paths: List.unmodifiable(paths),
+      isMove: isMove,
+    );
   }
 
   void clear() => state = null;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/lv_option.dart';
 import '../providers/website_providers.dart';
@@ -97,6 +98,20 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
     if (domains.isEmpty) {
       showSnack(context, '请至少填写一个域名', error: true);
       return;
+    }
+    for (final domain in domains) {
+      final error = validateDomain(domain);
+      if (error != null) {
+        showSnack(context, '域名 $domain：$error', error: true);
+        return;
+      }
+    }
+    for (final listen in listens) {
+      final error = validateListenAddress(listen);
+      if (error != null) {
+        showSnack(context, '监听 $listen：$error', error: true);
+        return;
+      }
     }
     if (_type == 'php' && (_php == null || _php == 0)) {
       showSnack(context, '请选择 PHP 版本', error: true);
@@ -197,6 +212,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     hintText: 'example.com',
                     addButtonText: '添加域名',
                     helperText: '可填写多个域名，支持泛域名（如 *.example.com）',
+                    validator: validateDomain,
                     onChanged: (values) => _domains = values,
                   ),
                   const SizedBox(height: 12),
@@ -208,6 +224,7 @@ class _WebsiteCreatePageState extends ConsumerState<WebsiteCreatePage> {
                     addButtonText: '添加端口',
                     keyboardType: TextInputType.text,
                     helperText: '如 80、0.0.0.0:80；443 需在创建后于 HTTPS 中配置',
+                    validator: validateListenAddress,
                     onChanged: (values) => _listens = values,
                   ),
                 ],

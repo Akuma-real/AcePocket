@@ -124,10 +124,9 @@ class _TransferProgressDialogState extends State<_TransferProgressDialog> {
       result = const TransferResult();
     } on TransferCancelledException {
       result = const TransferResult(cancelled: true);
-    } on ApiException catch (e) {
-      result = TransferResult(error: e.message);
     } catch (e) {
-      result = TransferResult(error: '$e');
+      // describeError：非 ApiException 时避免露出原始英文异常。
+      result = TransferResult(error: describeError(e));
     }
     _finished = true;
     _ticker?.cancel();

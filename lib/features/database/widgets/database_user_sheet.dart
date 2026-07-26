@@ -6,6 +6,7 @@ import '../../../core/widgets/loading_view.dart';
 import '../models/database_server.dart';
 import '../models/database_user.dart';
 import '../models/db_types.dart';
+import '../utils/database_validation.dart';
 import '../providers/database_providers.dart';
 import 'db_feedback.dart';
 import 'db_sheet.dart';
@@ -51,6 +52,7 @@ class _DatabaseUserSheetState extends ConsumerState<DatabaseUserSheet> {
   String _hostOption = 'localhost';
   bool _submitting = false;
   String? _usernameError;
+  String? _hostError;
 
   bool get _isEdit => widget.user != null;
 
@@ -97,9 +99,17 @@ class _DatabaseUserSheetState extends ConsumerState<DatabaseUserSheet> {
       showMessage(context, '请填写密码', error: true);
       return;
     }
+    if (dbTypeUsesHost(server.type) && _hostOption == 'specific') {
+      final hostError = validateDbUserHost(_specificHost.text);
+      if (hostError != null) {
+        setState(() => _hostError = hostError);
+        return;
+      }
+    }
 
     setState(() {
       _usernameError = null;
+      _hostError = null;
       _submitting = true;
     });
 
@@ -246,17 +256,25 @@ class _DatabaseUserSheetState extends ConsumerState<DatabaseUserSheet> {
                   for (final option in kMysqlHostOptions)
                     DropdownMenuItem(value: option.$1, child: Text(option.$2)),
                 ],
-                onChanged: (value) =>
-                    setState(() => _hostOption = value ?? 'localhost'),
+                onChanged: (value) => setState(() {
+                  _hostOption = value ?? 'localhost';
+                  _hostError = null;
+                }),
               ),
               if (_hostOption == 'specific')
                 TextField(
                   controller: _specificHost,
                   autocorrect: false,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '指定主机',
-                    hintText: '如 192.168.1.10',
+                    hintText: '如 192.0.2.10 或 192.0.2.%',
+                    errorText: _hostError,
                   ),
+                  onChanged: (_) {
+                    if (_hostError != null) {
+                      setState(() => _hostError = null);
+                    }
+                  },
                 ),
             ],
             PrivilegesEditor(

@@ -56,23 +56,39 @@ class ApiClient {
 
   /// [receiveTimeout] 用于个别耗时远超默认 60 秒的接口（如服务器跑分），
   /// 省略时使用客户端默认值。
+  ///
+  /// [cancelToken] 用于取消在途请求（如跑分页退出 / 用户点停止）；
+  /// 取消后请求以 [ApiException]（「请求已取消」）结束，省略时行为不变。
   Future<dynamic> get(String path,
-          {Map<String, dynamic>? query, Duration? receiveTimeout}) =>
-      _request('GET', path, query: query, receiveTimeout: receiveTimeout);
+          {Map<String, dynamic>? query,
+          Duration? receiveTimeout,
+          CancelToken? cancelToken}) =>
+      _request('GET', path,
+          query: query,
+          receiveTimeout: receiveTimeout,
+          cancelToken: cancelToken);
 
   Future<dynamic> post(String path,
           {Object? body,
           Map<String, dynamic>? query,
-          Duration? receiveTimeout}) =>
+          Duration? receiveTimeout,
+          CancelToken? cancelToken}) =>
       _request('POST', path,
-          body: body, query: query, receiveTimeout: receiveTimeout);
+          body: body,
+          query: query,
+          receiveTimeout: receiveTimeout,
+          cancelToken: cancelToken);
 
   Future<dynamic> put(String path,
           {Object? body,
           Map<String, dynamic>? query,
-          Duration? receiveTimeout}) =>
+          Duration? receiveTimeout,
+          CancelToken? cancelToken}) =>
       _request('PUT', path,
-          body: body, query: query, receiveTimeout: receiveTimeout);
+          body: body,
+          query: query,
+          receiveTimeout: receiveTimeout,
+          cancelToken: cancelToken);
 
   /// DELETE 请求。
   ///
@@ -81,8 +97,10 @@ class ApiClient {
   /// `internal/request/user_passkey.go`）；query 会参与 HMAC 签名的规范化，
   /// 因此**必须**通过本参数传入，不能自行拼接到 [path] 上。
   Future<dynamic> delete(String path,
-          {Object? body, Map<String, dynamic>? query}) =>
-      _request('DELETE', path, body: body, query: query);
+          {Object? body, Map<String, dynamic>? query,
+          CancelToken? cancelToken}) =>
+      _request('DELETE', path,
+          body: body, query: query, cancelToken: cancelToken);
 
   Future<dynamic> _request(
     String method,
@@ -90,6 +108,7 @@ class ApiClient {
     Map<String, dynamic>? query,
     Object? body,
     Duration? receiveTimeout,
+    CancelToken? cancelToken,
   }) async {
     final apiPath = _apiPath(path);
     final canonicalQuery = _canonicalQuery(query);
@@ -113,6 +132,7 @@ class ApiClient {
       response = await _dio.request<dynamic>(
         url,
         data: bodyString.isEmpty ? null : bodyString,
+        cancelToken: cancelToken,
         options: Options(
           method: method,
           receiveTimeout: receiveTimeout,
@@ -157,18 +177,28 @@ class ApiClient {
       return decoded;
     }
 
-    String message;
+    String? panelMsg;
     if (decoded is Map<String, dynamic> &&
         decoded['msg'] is String &&
         (decoded['msg'] as String).isNotEmpty) {
-      message = decoded['msg'] as String;
+      panelMsg = decoded['msg'] as String;
+    }
+    String message;
+    if (status == 401 || status == 403) {
+      // 401/403 统一为可读文案：低权限令牌访问受限接口时，
+      // 面板只回一句原始 msg，用户难以自行定位原因。
+      // 原始 msg 保留在 panelMessage 供定制文案（如连接测试）使用。
+      message = '当前账号无权访问该功能，请使用管理员账号或检查 API 令牌权限'
+          '（HTTP $status${panelMsg == null ? '' : '：$panelMsg'}）';
+    } else if (panelMsg != null) {
+      message = panelMsg;
     } else if (status == 418 || status == 404) {
       // 418/404 常见于「访问入口」校验失败（entrance.go abortEntrance）。
       message = '请求被面板拒绝（HTTP $status），请检查服务器地址与访问入口配置';
     } else {
       message = '请求失败（HTTP $status）';
     }
-    throw ApiException(message, statusCode: status);
+    throw ApiException(message, statusCode: status, panelMessage: panelMsg);
   }
 
   /// 归一化为以 /api 开头的路径。

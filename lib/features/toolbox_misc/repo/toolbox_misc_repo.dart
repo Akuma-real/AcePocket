@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart' show CancelToken;
+
 import '../../../core/api/api_client.dart';
 import '../models/benchmark_models.dart';
 import '../models/log_models.dart';
@@ -152,32 +154,37 @@ class ToolboxMiscRepository {
   static const Duration _benchmarkTimeout = Duration(minutes: 10);
 
   /// 运行单个 CPU 跑分项目，返回分值。
-  Future<int> benchmarkCpu(String name) async {
+  ///
+  /// [cancelToken] 用于用户停止测试 / 退出页面时取消在途请求。
+  Future<int> benchmarkCpu(String name, {CancelToken? cancelToken}) async {
     final data = await _api.post(
       '/toolbox_benchmark/test',
       body: {'name': name},
       receiveTimeout: _benchmarkTimeout,
+      cancelToken: cancelToken,
     );
     return (data as num?)?.toInt() ?? 0;
   }
 
   /// 运行内存跑分。
-  Future<MemoryBenchmark> benchmarkMemory() async {
+  Future<MemoryBenchmark> benchmarkMemory({CancelToken? cancelToken}) async {
     final data = await _api.post(
       '/toolbox_benchmark/test',
       body: {'name': 'memory'},
       receiveTimeout: _benchmarkTimeout,
+      cancelToken: cancelToken,
     );
     return MemoryBenchmark.fromJson(
         data is Map<String, dynamic> ? data : const {});
   }
 
   /// 运行磁盘 IO 跑分。
-  Future<DiskBenchmark> benchmarkDisk() async {
+  Future<DiskBenchmark> benchmarkDisk({CancelToken? cancelToken}) async {
     final data = await _api.post(
       '/toolbox_benchmark/test',
       body: {'name': 'disk'},
       receiveTimeout: _benchmarkTimeout,
+      cancelToken: cancelToken,
     );
     return DiskBenchmark.fromJson(
         data is Map<String, dynamic> ? data : const {});

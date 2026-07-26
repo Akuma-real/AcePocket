@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/downsample.dart';
 import '../../../core/widgets/section_card.dart';
 import 'formatters.dart';
 
@@ -54,6 +55,13 @@ class MonitorChartCard extends StatelessWidget {
   final double? maxY;
   final double height;
 
+  /// 抽样后交给 fl_chart 绘制的目标点数上限。
+  ///
+  /// 30 天 × 分钟级采样约 4.3 万点/曲线，全量绘制会导致滑动与 tooltip
+  /// 明显掉帧；超过该值时先做 LTTB 抽样（并强制保留各序列全局极值点，
+  /// 见 [downsampleIndexes]），实际点数最多为该值 + 2 × 序列数。
+  static const int _maxPoints = 300;
+
   int get _length {
     var length = times.length;
     for (final s in series) {
@@ -65,8 +73,36 @@ class MonitorChartCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final length = _length;
     final withDate = _spansMultipleDays;
+
+    // 数据点过多时先抽样再绘制，峰值（各序列全局最值）保证保留。
+    var times = this.times;
+    var series = this.series;
+    String? sampleNote;
+    final rawLength = _length;
+    if (rawLength > _maxPoints) {
+      final indexes = downsampleIndexes(
+        length: rawLength,
+        seriesValues: [for (final s in series) s.values],
+        threshold: _maxPoints,
+      );
+      times = [for (final i in indexes) times[i]];
+      series = [
+        for (final s in series)
+          ChartSeries(
+            name: s.name,
+            values: [for (final i in indexes) s.values[i]],
+            color: s.color,
+          ),
+      ];
+      sampleNote = '已抽样显示，共 ${indexes.length} 个采样点';
+    }
+    final length = math.min(rawLength, times.length);
+
+    final subtitleText = [
+      if (subtitle != null) subtitle!,
+      if (sampleNote != null) sampleNote,
+    ].join(' · ');
 
     if (length < 2) {
       return SectionCard(
@@ -112,9 +148,9 @@ class MonitorChartCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (subtitle != null) ...[
+          if (subtitleText.isNotEmpty) ...[
             Text(
-              subtitle!,
+              subtitleText,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

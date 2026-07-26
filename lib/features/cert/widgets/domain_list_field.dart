@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/input_validation.dart';
+
 /// 域名动态输入框列表（对应面板前端的 n-dynamic-input）。
 ///
 /// 至少保留一行；内容变化时通过 [onChanged] 回传去空后的域名列表。
@@ -108,11 +110,17 @@ class _DomainListFieldState extends State<DomainListField> {
                     autocorrect: false,
                     keyboardType: TextInputType.url,
                     textInputAction: TextInputAction.next,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     decoration: InputDecoration(
                       hintText: widget.hint,
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
+                    validator: (value) {
+                      final v = (value ?? '').trim();
+                      if (v.isEmpty) return null;
+                      return validateDomain(v);
+                    },
                     onChanged: (_) => _emit(),
                   ),
                 ),

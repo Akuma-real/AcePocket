@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/input_validation.dart';
+
 /// 「上传 / 获取文件」入口的可选方式。
 enum UploadMethod {
   /// 用系统文件选择器挑选手机本地文件上传
@@ -96,12 +98,9 @@ class _TextUploadDialogState extends State<_TextUploadDialog> {
 
   void _submit() {
     final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = '文件名不能为空');
-      return;
-    }
-    if (name.contains('/')) {
-      setState(() => _error = '文件名不能包含 /');
+    final error = validateFileName(name);
+    if (error != null) {
+      setState(() => _error = error);
       return;
     }
     Navigator.of(context)

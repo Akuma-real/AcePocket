@@ -67,14 +67,19 @@ class ApiClient {
   // 失败（HTTP 非 2xx 或业务错误）抛 ApiException(message)。
   // query 参与 HMAC 签名的规范化，绝不能自行拼进 path。
   // receiveTimeout 用于个别远超默认 60 秒的接口（如 /toolbox_benchmark/test）。
+  // cancelToken 用于取消在途请求（如跑分页停止 / 退出），取消后以
+  // ApiException(「请求已取消」) 结束。
   Future<dynamic> get(String path,
-      {Map<String, dynamic>? query, Duration? receiveTimeout});
+      {Map<String, dynamic>? query, Duration? receiveTimeout,
+      CancelToken? cancelToken});
   Future<dynamic> post(String path,
-      {Object? body, Map<String, dynamic>? query, Duration? receiveTimeout});
+      {Object? body, Map<String, dynamic>? query, Duration? receiveTimeout,
+      CancelToken? cancelToken});
   Future<dynamic> put(String path,
-      {Object? body, Map<String, dynamic>? query, Duration? receiveTimeout});
+      {Object? body, Map<String, dynamic>? query, Duration? receiveTimeout,
+      CancelToken? cancelToken});
   Future<dynamic> delete(String path,
-      {Object? body, Map<String, dynamic>? query});
+      {Object? body, Map<String, dynamic>? query, CancelToken? cancelToken});
 }
 // 只收发 JSON。multipart / 二进制流（文件与备份的上传下载、防火墙规则导入导出）
 // 用 features/files/repo/transfer_client.dart 的 PanelTransferClient（同一套签名）。

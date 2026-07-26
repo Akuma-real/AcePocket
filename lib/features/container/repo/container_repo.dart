@@ -121,18 +121,26 @@ class ContainerRepository {
   }
 
   /// 拉取镜像（HTTP 阻塞式；带进度的方式见 `/api/ws/container/image/pull`）。
+  ///
+  /// 面板同步执行 `docker pull` 后才返回，大镜像 + 慢网络下远超
+  /// [ApiClient] 默认 60 秒 receiveTimeout，因此放宽到 30 分钟，
+  /// 避免客户端提前超时报错而服务器仍在后台拉取。
   Future<void> pullImage({
     required String name,
     bool auth = false,
     String username = '',
     String password = '',
   }) =>
-      _api.post('/container/image', body: {
-        'name': name,
-        'auth': auth,
-        'username': username,
-        'password': password,
-      });
+      _api.post(
+        '/container/image',
+        body: {
+          'name': name,
+          'auth': auth,
+          'username': username,
+          'password': password,
+        },
+        receiveTimeout: const Duration(minutes: 30),
+      );
 
   Future<void> removeImage(String id) => _api.delete('/container/image/$id');
 

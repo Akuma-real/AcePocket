@@ -230,14 +230,25 @@ class _FirewallPageState extends ConsumerState<FirewallPage>
 
 // --------------------------------------------------------------------- 端口规则
 
-class _PortRuleTab extends ConsumerWidget {
+class _PortRuleTab extends ConsumerStatefulWidget {
   const _PortRuleTab();
 
-  Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
-    FirewallRule rule,
-  ) async {
+  @override
+  ConsumerState<_PortRuleTab> createState() => _PortRuleTabState();
+}
+
+class _PortRuleTabState extends ConsumerState<_PortRuleTab> {
+  /// 正在删除的规则标识（网站列表 `_busyId` 模式）：
+  /// 该行按钮禁用并显示进度，防止在途时二次点出确认框重复提交。
+  String? _busyKey;
+
+  /// 规则无服务端 id，用全部业务字段拼出行标识。
+  String _keyOf(FirewallRule rule) =>
+      '${rule.family}/${rule.protocol}/${rule.portStart}-${rule.portEnd}/'
+      '${rule.address}/${rule.strategy}/${rule.direction}';
+
+  Future<void> _delete(FirewallRule rule) async {
+    if (_busyKey != null) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '删除端口规则？',
@@ -247,19 +258,22 @@ class _PortRuleTab extends ConsumerWidget {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
+    setState(() => _busyKey = _keyOf(rule));
     try {
       await ref.read(securityRepoProvider).deleteFirewallRule(rule);
       ref.invalidate(firewallRulesProvider);
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, '已删除');
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, errorMessage(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busyKey = null);
     }
   }
 
-  void _showUsage(BuildContext context, WidgetRef ref, FirewallRule rule) {
+  void _showUsage(FirewallRule rule) {
     showPortUsageDialog(
       context,
       port: rule.portStart,
@@ -272,7 +286,7 @@ class _PortRuleTab extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(firewallRulesProvider);
     final notifier = ref.read(firewallRulesProvider.notifier);
     final theme = Theme.of(context);
@@ -293,7 +307,9 @@ class _PortRuleTab extends ConsumerWidget {
       },
       itemBuilder: (context, rule, index) {
         final accept = rule.strategy == 'accept';
+        final busy = _busyKey == _keyOf(rule);
         return ListTile(
+          enabled: !busy,
           leading: Icon(
             rule.direction == 'in' ? Icons.login : Icons.logout,
             color: accept ? theme.colorScheme.primary : theme.colorScheme.error,
@@ -326,20 +342,26 @@ class _PortRuleTab extends ConsumerWidget {
             '${FirewallLabels.family(rule.family)} · '
             '来源 ${rule.address.isEmpty ? '不限' : rule.address}',
           ),
-          trailing: PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'usage':
-                  _showUsage(context, ref, rule);
-                case 'delete':
-                  _delete(context, ref, rule);
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'usage', child: Text('查看端口占用')),
-              PopupMenuItem(value: 'delete', child: Text('删除')),
-            ],
-          ),
+          trailing: busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : PopupMenuButton<String>(
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'usage':
+                        _showUsage(rule);
+                      case 'delete':
+                        _delete(rule);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'usage', child: Text('查看端口占用')),
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
         );
       },
     );
@@ -348,14 +370,23 @@ class _PortRuleTab extends ConsumerWidget {
 
 // ---------------------------------------------------------------------- IP 规则
 
-class _IpRuleTab extends ConsumerWidget {
+class _IpRuleTab extends ConsumerStatefulWidget {
   const _IpRuleTab();
 
-  Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
-    FirewallIpRule rule,
-  ) async {
+  @override
+  ConsumerState<_IpRuleTab> createState() => _IpRuleTabState();
+}
+
+class _IpRuleTabState extends ConsumerState<_IpRuleTab> {
+  /// 正在删除的规则标识：在途时该行按钮禁用，防止二次点出确认框。
+  String? _busyKey;
+
+  String _keyOf(FirewallIpRule rule) =>
+      '${rule.family}/${rule.protocol}/${rule.address}/'
+      '${rule.strategy}/${rule.direction}';
+
+  Future<void> _delete(FirewallIpRule rule) async {
+    if (_busyKey != null) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '删除 IP 规则？',
@@ -365,20 +396,23 @@ class _IpRuleTab extends ConsumerWidget {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
+    setState(() => _busyKey = _keyOf(rule));
     try {
       await ref.read(securityRepoProvider).deleteFirewallIpRule(rule);
       ref.invalidate(firewallIpRulesProvider);
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, '已删除');
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, errorMessage(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busyKey = null);
     }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(firewallIpRulesProvider);
     final notifier = ref.read(firewallIpRulesProvider.notifier);
     final theme = Theme.of(context);
@@ -399,7 +433,9 @@ class _IpRuleTab extends ConsumerWidget {
       },
       itemBuilder: (context, rule, index) {
         final accept = rule.strategy == 'accept';
+        final busy = _busyKey == _keyOf(rule);
         return ListTile(
+          enabled: !busy,
           leading: Icon(
             accept ? Icons.verified_user_outlined : Icons.block,
             color: accept ? theme.colorScheme.primary : theme.colorScheme.error,
@@ -411,11 +447,17 @@ class _IpRuleTab extends ConsumerWidget {
             '${FirewallLabels.family(rule.family)} · '
             '${FirewallLabels.strategy(rule.strategy)}',
           ),
-          trailing: IconButton(
-            tooltip: '删除',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => _delete(context, ref, rule),
-          ),
+          trailing: busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : IconButton(
+                  tooltip: '删除',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _delete(rule),
+                ),
         );
       },
     );
@@ -424,14 +466,23 @@ class _IpRuleTab extends ConsumerWidget {
 
 // --------------------------------------------------------------------- 端口转发
 
-class _ForwardTab extends ConsumerWidget {
+class _ForwardTab extends ConsumerStatefulWidget {
   const _ForwardTab();
 
-  Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
-    FirewallForward forward,
-  ) async {
+  @override
+  ConsumerState<_ForwardTab> createState() => _ForwardTabState();
+}
+
+class _ForwardTabState extends ConsumerState<_ForwardTab> {
+  /// 正在删除的转发标识：在途时该行按钮禁用，防止二次点出确认框。
+  String? _busyKey;
+
+  String _keyOf(FirewallForward forward) =>
+      '${forward.protocol}/${forward.port}/'
+      '${forward.targetIp}:${forward.targetPort}';
+
+  Future<void> _delete(FirewallForward forward) async {
+    if (_busyKey != null) return;
     final confirmed = await showConfirmDialog(
       context,
       title: '删除端口转发？',
@@ -440,20 +491,23 @@ class _ForwardTab extends ConsumerWidget {
       confirmText: '删除',
       danger: true,
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
+    setState(() => _busyKey = _keyOf(forward));
     try {
       await ref.read(securityRepoProvider).deleteFirewallForward(forward);
       ref.invalidate(firewallForwardsProvider);
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, '已删除');
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       showSnack(context, errorMessage(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busyKey = null);
     }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(firewallForwardsProvider);
     final notifier = ref.read(firewallForwardsProvider.notifier);
     final theme = Theme.of(context);
@@ -472,18 +526,28 @@ class _ForwardTab extends ConsumerWidget {
           showSnack(context, errorMessage(e), error: true);
         }
       },
-      itemBuilder: (context, forward, index) => ListTile(
-        leading: Icon(Icons.alt_route, color: theme.colorScheme.primary),
-        title: Text(
-          '${forward.port} → ${forward.targetIp}:${forward.targetPort}',
-        ),
-        subtitle: Text('协议 ${FirewallLabels.protocol(forward.protocol)}'),
-        trailing: IconButton(
-          tooltip: '删除',
-          icon: const Icon(Icons.delete_outline),
-          onPressed: () => _delete(context, ref, forward),
-        ),
-      ),
+      itemBuilder: (context, forward, index) {
+        final busy = _busyKey == _keyOf(forward);
+        return ListTile(
+          enabled: !busy,
+          leading: Icon(Icons.alt_route, color: theme.colorScheme.primary),
+          title: Text(
+            '${forward.port} → ${forward.targetIp}:${forward.targetPort}',
+          ),
+          subtitle: Text('协议 ${FirewallLabels.protocol(forward.protocol)}'),
+          trailing: busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : IconButton(
+                  tooltip: '删除',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _delete(forward),
+                ),
+        );
+      },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/disk_models.dart';
 import '../models/lvm_models.dart';
+import '../utils/disk_validation.dart';
 import 'disk_widgets.dart';
 
 /// 破坏性操作的最终确认：必须**手动输入设备名**才能继续。
@@ -146,6 +147,7 @@ class _MountDialogState extends State<_MountDialog> {
   final TextEditingController _option = TextEditingController(text: 'defaults');
   bool _writeFstab = false;
   String? _error;
+  String? _optionError;
 
   @override
   void dispose() {
@@ -162,6 +164,11 @@ class _MountDialogState extends State<_MountDialog> {
     }
     if (path == '/') {
       setState(() => _error = '不能挂载到根目录');
+      return;
+    }
+    final optionError = validateMountOptions(_option.text);
+    if (optionError != null) {
+      setState(() => _optionError = optionError);
       return;
     }
     Navigator.of(context).pop((
@@ -221,12 +228,16 @@ class _MountDialogState extends State<_MountDialog> {
               controller: _option,
               autocorrect: false,
               enableSuggestions: false,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '挂载选项',
                 hintText: 'defaults,noatime',
                 helperText: '仅在写入 fstab 时生效，留空按 defaults 处理',
-                border: OutlineInputBorder(),
+                errorText: _optionError,
+                border: const OutlineInputBorder(),
               ),
+              onChanged: (_) {
+                if (_optionError != null) setState(() => _optionError = null);
+              },
             ),
             const SizedBox(height: 4),
             SwitchListTile(
@@ -460,8 +471,9 @@ class _CreateVgDialogState extends State<_CreateVgDialog> {
 
   void _submit() {
     final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = '请输入卷组名称');
+    final nameError = validateVolumeGroupName(name);
+    if (nameError != null) {
+      setState(() => _error = nameError);
       return;
     }
     if (_selected.isEmpty) {

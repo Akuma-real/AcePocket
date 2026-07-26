@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../models/firewall_models.dart';
 
 const _protocols = ['tcp', 'udp', 'tcp/udp'];
 const _families = ['ipv4', 'ipv6'];
 const _strategies = ['accept', 'drop', 'reject'];
 const _directions = ['in', 'out'];
-
-/// 端口 / IP 校验（宽松校验，最终以面板校验为准）。
-final _addressPattern = RegExp(r'^[0-9a-fA-F:.]+(/\d{1,3})?$');
-final _ipPattern = RegExp(r'^[0-9a-fA-F:.]+$');
 
 /// 新建防火墙端口规则（返回 null 表示取消）。
 ///
@@ -264,8 +261,7 @@ class _FirewallRuleFormState extends State<_FirewallRuleForm> {
             validator: (value) {
               final text = (value ?? '').trim();
               if (text.isEmpty) return null;
-              if (!_addressPattern.hasMatch(text)) return '请输入合法的 IP 或 CIDR';
-              return null;
+              return validateIpOrCidr(text, family: _family);
             },
           ),
           const SizedBox(height: 16),
@@ -362,8 +358,7 @@ class _FirewallIpRuleFormState extends State<_FirewallIpRuleForm> {
             validator: (value) {
               final text = (value ?? '').trim();
               if (text.isEmpty) return '请输入 IP 地址或网段';
-              if (!_addressPattern.hasMatch(text)) return '请输入合法的 IP 或 CIDR';
-              return null;
+              return validateIpOrCidr(text, family: _family);
             },
           ),
           const SizedBox(height: 16),
@@ -463,8 +458,7 @@ class _FirewallForwardFormState extends State<_FirewallForwardForm> {
             validator: (value) {
               final text = (value ?? '').trim();
               if (text.isEmpty) return '请输入目标 IP';
-              if (!_ipPattern.hasMatch(text)) return '请输入合法的 IP 地址';
-              return null;
+              return validateIpAddress(text);
             },
           ),
           const SizedBox(height: 16),

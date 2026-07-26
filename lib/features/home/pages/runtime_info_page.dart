@@ -183,7 +183,7 @@ class _RuntimeInfoPageState extends ConsumerState<RuntimeInfoPage>
   void _openRaw(List<GoroutineInfo> list) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => _RawStackPage(text: _rawText(list)),
+        builder: (_) => _RawStackPage(list: list),
       ),
     );
   }
@@ -283,15 +283,24 @@ class _GoroutineHeader extends StatelessWidget {
   }
 }
 
-/// 全部协程堆栈的原始文本页：等宽字体，纵横皆可滚动，可整体复制。
+/// 全部协程堆栈的原始文本页。
+///
+/// 协程可达数千个、拼接后的全文可达数 MB，塞进单个 [SelectableText]
+/// 会让布局与文本测量冻结数秒，因此这里按协程分块用 [ListView.builder]
+/// 懒加载渲染；「复制全部」仍会拼接全文写入剪贴板。
 class _RawStackPage extends StatelessWidget {
-  const _RawStackPage({required this.text});
+  const _RawStackPage({required this.list});
 
-  final String text;
+  final List<GoroutineInfo> list;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      fontFamily: 'monospace',
+      height: 1.45,
+      color: theme.colorScheme.onSurface,
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text('协程堆栈原文'),
@@ -300,7 +309,9 @@ class _RawStackPage extends StatelessWidget {
             tooltip: '复制全部',
             icon: const Icon(Icons.copy_all),
             onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: text));
+              await Clipboard.setData(ClipboardData(
+                text: _RuntimeInfoPageState._rawText(list),
+              ));
               if (!context.mounted) return;
               ScaffoldMessenger.of(context)
                 ..hideCurrentSnackBar()
@@ -309,17 +320,14 @@ class _RawStackPage extends StatelessWidget {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: ListView.builder(
         padding: const EdgeInsets.all(12),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SelectableText(
-            text,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
-              height: 1.45,
-              color: theme.colorScheme.onSurface,
-            ),
+        itemCount: list.length,
+        itemBuilder: (context, index) => Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SelectableText(list[index].raw, style: style),
           ),
         ),
       ),

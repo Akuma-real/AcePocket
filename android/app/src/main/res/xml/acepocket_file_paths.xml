@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- open_filex 的 FileProvider 授权范围（覆盖插件默认的全盘 root-path，
+     见 app 清单中对 android.support.FILE_PROVIDER_PATHS 的 tools:replace）。
+     只允许为应用下载目录签发 content URI：
+     lib/features/files/repo/transfer_client.dart 的 resolveDownloadDirectory()
+     在 Android 上使用 getExternalStorageDirectory()/AcePanel，
+     对应 FileProvider 的 external-files-path。 -->
+<paths>
+    <external-files-path
+        name="acepanel_downloads"
+        path="AcePanel/"/>
+</paths>

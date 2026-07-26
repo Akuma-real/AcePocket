@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../models/website_setting.dart';
 
 /// 监听地址编辑器，对应 `pkg/webserver/types.Listen`。
@@ -75,12 +76,15 @@ class _ListenListFieldState extends State<ListenListField> {
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
+                        child: TextFormField(
                           controller: _controllerFor(listen),
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: const InputDecoration(
                             labelText: '地址',
                             hintText: '80',
                           ),
+                          validator: (value) =>
+                              validateListenAddress(value ?? ''),
                           onChanged: (v) {
                             listen.address = v.trim();
                             widget.onChanged();

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/confirm_dialog.dart';
+import '../../../core/widgets/not_installed_view.dart';
 import '../models/container.dart';
 import '../providers/container_providers.dart';
 import '../widgets/action_runner.dart';
@@ -195,27 +196,45 @@ class _ContainerListPageState extends ConsumerState<ContainerListPage> {
             ),
           ),
           const _QuickNavBar(),
-          Expanded(
-            child: PagedListView<ContainerItem>(
-              state: state,
-              loadingMessage: '正在加载容器列表…',
-              emptyMessage: ref.watch(containerKeywordProvider).isEmpty
-                  ? '还没有任何容器'
-                  : '没有匹配的容器',
-              emptyIcon: Icons.inbox_outlined,
-              onRefresh: () => ref.read(containersProvider.notifier).refresh(),
-              onLoadMore: () =>
-                  ref.read(containersProvider.notifier).loadMore(),
-              onRetry: () => ref.invalidate(containersProvider),
-              itemBuilder: (context, item) => ContainerTile(
-                item: item,
-                onTap: () => context.push('/containers/${item.id}'),
-                onShowLogs: () => context.push('/containers/${item.id}/logs'),
-                onAction: (action) => _handleAction(item, action),
-              ),
-            ),
-          ),
+          Expanded(child: _buildBody(state)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBody(AsyncValue<PagedState<ContainerItem>> state) {
+    // 列表加载失败时探测容器引擎是否已安装：未安装展示专门空态
+    // （而不是把面板的原始报错丢给用户）；探测失败则回退到通用错误视图。
+    if (state.hasError && !state.isLoading) {
+      final installed = ref.watch(containerEngineInstalledProvider);
+      if (installed.valueOrNull == false) {
+        return NotInstalledView(
+          title: '未安装容器引擎',
+          message: '容器管理需要面板已安装 Docker（或 Podman）应用，'
+              '请先到应用商店安装后再使用本功能。',
+          icon: Icons.directions_boat_outlined,
+          onRecheck: () {
+            ref.invalidate(containerEngineInstalledProvider);
+            ref.invalidate(containersProvider);
+          },
+        );
+      }
+    }
+    return PagedListView<ContainerItem>(
+      state: state,
+      loadingMessage: '正在加载容器列表…',
+      emptyMessage: ref.watch(containerKeywordProvider).isEmpty
+          ? '还没有任何容器'
+          : '没有匹配的容器',
+      emptyIcon: Icons.inbox_outlined,
+      onRefresh: () => ref.read(containersProvider.notifier).refresh(),
+      onLoadMore: () => ref.read(containersProvider.notifier).loadMore(),
+      onRetry: () => ref.invalidate(containersProvider),
+      itemBuilder: (context, item) => ContainerTile(
+        item: item,
+        onTap: () => context.push('/containers/${item.id}'),
+        onShowLogs: () => context.push('/containers/${item.id}/logs'),
+        onAction: (action) => _handleAction(item, action),
       ),
     );
   }

@@ -126,6 +126,28 @@ class FileItem {
   }
 }
 
+/// 把面板格式化后的大小文案（如 `1.25 MB`、`512 B`、`3.4 GB`）解析为字节数。
+///
+/// 用于在进入编辑器前按 [FileItem.size] 做大小预检。格式不可识别
+/// （如目录的空字符串）时返回 null，调用方应放行而非拦截。
+int? parseFormattedSize(String size) {
+  final match = RegExp(
+    r'^\s*([\d,]+(?:\.\d+)?)\s*([KMGTPE]?)I?B?\s*$',
+    caseSensitive: false,
+  ).firstMatch(size);
+  if (match == null) return null;
+  final value = double.tryParse(match.group(1)!.replaceAll(',', ''));
+  if (value == null) return null;
+  const units = {'': 0, 'K': 1, 'M': 2, 'G': 3, 'T': 4, 'P': 5, 'E': 6};
+  final exponent = units[match.group(2)!.toUpperCase()];
+  if (exponent == null) return null;
+  var multiplier = 1.0;
+  for (var i = 0; i < exponent; i++) {
+    multiplier *= 1024;
+  }
+  return (value * multiplier).round();
+}
+
 /// 文件列表分页结果（`GET /api/file/list` 的 `{total, items}`）。
 class FileListPage {
   const FileListPage({required this.total, required this.items});

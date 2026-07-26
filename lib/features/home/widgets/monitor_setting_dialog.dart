@@ -63,17 +63,12 @@ class _MonitorSettingDialogState extends ConsumerState<MonitorSettingDialog> {
           );
       if (!mounted) return;
       Navigator.of(context).pop(true);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = e.message;
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = '$e';
+        // describeError：非 ApiException 时避免露出原始英文异常。
+        _error = describeError(e);
       });
     }
   }

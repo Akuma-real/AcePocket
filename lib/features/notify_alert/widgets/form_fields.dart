@@ -209,6 +209,7 @@ class StringListField extends StatefulWidget {
     this.label = '列表',
     this.hint = '',
     this.keyboardType = TextInputType.text,
+    this.validator,
   });
 
   final List<String> initialValues;
@@ -216,6 +217,10 @@ class StringListField extends StatefulWidget {
   final String label;
   final String hint;
   final TextInputType keyboardType;
+
+  /// 单条内容的校验器（入参已 trim 且非空）；返回 null 表示通过。
+  /// 空条目在回传时会被过滤，因此这里不校验空值。
+  final String? Function(String value)? validator;
 
   @override
   State<StringListField> createState() => _StringListFieldState();
@@ -298,16 +303,24 @@ class _StringListFieldState extends State<StringListField> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: TextFormField(
                     controller: _controllers[i],
                     autocorrect: false,
                     keyboardType: widget.keyboardType,
                     textInputAction: TextInputAction.next,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     decoration: InputDecoration(
                       hintText: widget.hint,
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
+                    validator: widget.validator == null
+                        ? null
+                        : (value) {
+                            final v = (value ?? '').trim();
+                            if (v.isEmpty) return null;
+                            return widget.validator!(v);
+                          },
                     onChanged: (_) => _emit(),
                   ),
                 ),

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/paged_notifier_base.dart';
 import '../../../core/storage/server_store.dart';
+import '../../apps/repo/apps_repo.dart';
 import '../models/container.dart';
 import '../models/container_compose.dart';
 import '../models/container_image.dart';
@@ -17,6 +18,17 @@ export '../../../core/providers/paged_notifier_base.dart' show PagedState;
 final containerRepoProvider = Provider<ContainerRepository>(
   (ref) => ContainerRepository(ref.watch(apiClientProvider)),
 );
+
+/// 容器引擎（Docker / Podman 应用）是否已安装：`GET /app/is_installed`。
+///
+/// 仅在容器列表加载失败时用于区分「未安装」与其他错误，
+/// 从而展示带「去应用商店安装」入口的专门空态；
+/// 检测请求本身失败时由页面回退到通用错误视图。
+final containerEngineInstalledProvider =
+    FutureProvider.autoDispose<bool>((ref) {
+  return AppsRepo(ref.watch(apiClientProvider))
+      .isInstalled(const ['docker', 'podman']);
+});
 
 // --------------------------------------------------------------- 分页状态
 

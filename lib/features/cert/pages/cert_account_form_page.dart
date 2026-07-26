@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -112,8 +113,9 @@ class _AccountFormState extends ConsumerState<_AccountForm> {
 
   Future<void> _submit() async {
     final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      showSnack(context, '请填写有效的邮箱地址', error: true);
+    final emailError = validateEmail(email);
+    if (emailError != null) {
+      showSnack(context, emailError, error: true);
       return;
     }
     if (_needsEab &&

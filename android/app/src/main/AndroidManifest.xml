@@ -1,11 +1,37 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- 访问面板 API 必需。flutter create 只在 debug/profile 的 manifest 中加入此权限，
          release 构建必须在此显式声明，否则所有网络请求都会失败。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- open_filex 插件的清单会 merge 进以下四个存储/媒体读取权限。
+         本应用只用它打开自己下载目录（应用私有外部目录）里的文件，通过 FileProvider
+         签发 content URI 即可，完全不需要读取共享存储或媒体库，这里显式移除，
+         避免商店审核质疑与用户侧的权限告警面。 -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_AUDIO"
+        tools:node="remove"/>
+
+    <!-- allowBackup="false"：禁用云备份与设备迁移备份。
+         服务器凭据经 flutter_secure_storage（EncryptedSharedPreferences）落盘，
+         备份拿到的虽是密文，但密文一旦进入云端即可被离线保存待攻；且主密钥在
+         Keystore 中不可导出，恢复到新设备后必然解密失败，只会让用户看到配置
+         被静默清空（server_store.dart 对损坏数据的兜底）。备份既有风险又无收益，
+         因此直接整体禁用，而不是用 dataExtractionRules/fullBackupContent 做排除。 -->
     <application
         android:label="AcePocket"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -33,6 +59,21 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 收窄 open_filex 的 FileProvider 授权范围：插件默认的 filepaths.xml 含
+             <root-path path="."/>，可为整个文件系统的任意路径签发 content URI。
+             这里用 tools:replace 覆盖其 FILE_PROVIDER_PATHS，只保留应用自己的
+             下载目录（transfer_client.dart 的 resolveDownloadDirectory：
+             getExternalStorageDirectory()/AcePanel）。 -->
+        <provider
+            android:name="com.crazecoder.openfile.FileProvider"
+            android:authorities="${applicationId}.fileProvider.com.crazecoder.openfile"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/acepocket_file_paths"
+                tools:replace="android:resource"/>
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
@@ -228,8 +229,10 @@ final networkConnectionsProvider = AsyncNotifierProvider.autoDispose<
 
 /// 跑分控制器。
 ///
-/// 跑分是重量级耗时操作（单项可能数十秒），使用非 autoDispose 的 Notifier，
-/// 用户离开页面后任务继续、结果保留；切换服务器时重置。
+/// 跑分是重量级耗时操作（单项可能数分钟），使用非 autoDispose 的 Notifier
+/// 保留成绩；用户点「停止测试」或退出跑分页时通过 [CancelToken] 真正取消
+/// 在途请求（注意：客户端取消只是不再等待响应，面板侧当前项目仍会执行完）；
+/// 切换服务器时重置。
 final benchmarkProvider =
     NotifierProvider<BenchmarkNotifier, BenchmarkState>(BenchmarkNotifier.new);
 
@@ -237,12 +240,18 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
   bool _disposed = false;
   bool _stopRequested = false;
 
+  /// 当前在途跑分请求的取消令牌；无在途请求时为 null。
+  CancelToken? _cancelToken;
+
   @override
   BenchmarkState build() {
     ref.watch(activeServerProvider);
     _disposed = false;
     _stopRequested = false;
-    ref.onDispose(() => _disposed = true);
+    ref.onDispose(() {
+      _disposed = true;
+      _cancelToken?.cancel();
+    });
     return const BenchmarkState();
   }
 
@@ -251,11 +260,17 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
     state = value;
   }
 
-  /// 请求停止：当前项目跑完后结束（面板接口不支持中断已发出的请求）。
+  /// 停止测试：取消在途请求并结束本轮（面板侧当前项目仍会继续执行完）。
   void stop() {
     if (!state.running) return;
     _stopRequested = true;
     _set(state.copyWith(stopping: true));
+    _cancelToken?.cancel();
+  }
+
+  /// 跑分页退出时调用：若仍在测试则立即取消在途请求。
+  void cancelOngoing() {
+    if (state.running) stop();
   }
 
   /// 跑全部项目。
@@ -288,24 +303,33 @@ class BenchmarkNotifier extends Notifier<BenchmarkState> {
       if (_disposed) return;
       if (_stopRequested) break;
       _set(state.copyWith(currentKey: key));
+      final cancelToken = CancelToken();
+      _cancelToken = cancelToken;
       try {
         switch (key) {
           case 'memory':
-            final memory = await repo.benchmarkMemory();
+            final memory =
+                await repo.benchmarkMemory(cancelToken: cancelToken);
             _set(state.copyWith(memory: memory));
           case 'disk':
-            final disk = await repo.benchmarkDisk();
+            final disk = await repo.benchmarkDisk(cancelToken: cancelToken);
             _set(state.copyWith(disk: disk));
           default:
-            final score = await repo.benchmarkCpu(key);
+            final score =
+                await repo.benchmarkCpu(key, cancelToken: cancelToken);
             _set(state.copyWith(
               cpuScores: {...state.cpuScores, key: score},
             ));
         }
       } catch (e) {
+        // 主动停止 / 销毁导致的取消不算失败，直接结束本轮。
+        if (_disposed) return;
+        if (_stopRequested) break;
         _set(state.copyWith(
           errors: {...state.errors, key: _message(e)},
         ));
+      } finally {
+        _cancelToken = null;
       }
       completed++;
       _set(state.copyWith(completed: completed));

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
@@ -174,6 +175,22 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
     if (setting.listens.isEmpty) {
       showSnack(context, '请至少保留一个监听地址', error: true);
       return;
+    }
+    for (final domain in setting.domains) {
+      final error = validateDomain(domain);
+      if (error != null) {
+        showSnack(context, '域名 $domain：$error', error: true);
+        return;
+      }
+    }
+    for (final listen in setting.listens) {
+      final error = validateListenAddress(listen.address);
+      if (error != null) {
+        final label =
+            listen.address.isEmpty ? '存在未填写的监听地址' : '监听 ${listen.address}：$error';
+        showSnack(context, label, error: true);
+        return;
+      }
     }
     if (setting.path.isEmpty || !setting.path.startsWith('/')) {
       showSnack(context, '网站目录需为绝对路径', error: true);
@@ -819,6 +836,7 @@ class _WebsiteDetailPageState extends ConsumerState<WebsiteDetailPage> {
           hintText: 'example.com',
           addButtonText: '添加域名',
           helperText: '支持泛域名（*.example.com），泛域名签发证书需 DNS 验证',
+          validator: validateDomain,
           onChanged: (values) {
             setting.domains = values;
             _markDirty();

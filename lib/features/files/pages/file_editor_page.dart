@@ -97,14 +97,11 @@ class _FileEditorPageState extends ConsumerState<FileEditorPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已保存')),
       );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _saving = false);
-      _showError(e.message);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      _showError('$e');
+      // describeError：非 ApiException 时避免露出原始英文异常。
+      _showError(describeError(e));
     }
   }
 

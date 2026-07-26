@@ -44,16 +44,11 @@ class _FilePropertySheetState extends ConsumerState<FilePropertySheet> {
         _calculatedSize = size;
         _calculating = false;
       });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _sizeError = e.message;
-        _calculating = false;
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _sizeError = '$e';
+        // describeError：非 ApiException 时避免露出原始英文异常。
+        _sizeError = describeError(e);
         _calculating = false;
       });
     }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
+import '../models/current_info.dart';
 import '../providers/home_providers.dart';
 import 'formatters.dart';
 import 'mini_chart.dart';
@@ -75,29 +76,13 @@ class ResourceOverviewCard extends StatelessWidget {
               ),
             ],
           ),
+          // SWAP 是整机指标，与上方 CPU / 内存两列无从属关系。此前它是一行
+          // 「左标签 + Spacer + 右数值」，标签恰好落在 CPU 图下、数值恰好落在
+          // 内存图下，被误读为两列各自的注解。改为带底色的独立区块，并把标签
+          // 与数值紧邻排布，从视觉上与上方两列断开。
           if (info.swap.total > 0) ...[
-            const SizedBox(height: 4),
-            Divider(color: theme.colorScheme.outlineVariant),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(Icons.swap_horiz,
-                    size: 18, color: theme.colorScheme.onSurfaceVariant),
-                const SizedBox(width: 8),
-                Text(
-                  'SWAP',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${formatBytes(info.swap.used)} / ${formatBytes(info.swap.total)}'
-                  '（${formatPercent(info.swap.usedPercent)}）',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
+            const SizedBox(height: 16),
+            _SwapBar(swap: info.swap),
           ],
         ],
       ),
@@ -185,6 +170,70 @@ class _Gauge extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// SWAP（交换分区）使用情况。
+///
+/// 整机指标，不属于上方 CPU / 内存任一列，因此用独立底色区块承载，
+/// 标签与数值紧邻排布，避免被误认为两列的注解。
+class _SwapBar extends StatelessWidget {
+  const _SwapBar({required this.swap});
+
+  final SwapStat swap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final percent = swap.usedPercent.clamp(0, 100).toDouble();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.swap_horiz,
+                  size: 18, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Text(
+                'SWAP 交换分区',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${formatBytes(swap.used)} / ${formatBytes(swap.total)}',
+                  style: theme.textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                formatPercent(swap.usedPercent),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: percent / 100,
+              minHeight: 5,
+              backgroundColor: theme.colorScheme.surfaceContainerHigh,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

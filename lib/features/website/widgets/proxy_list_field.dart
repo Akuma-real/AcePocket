@@ -4,6 +4,15 @@ import '../models/json_utils.dart';
 import '../models/website_setting.dart';
 import 'kv_list_field.dart';
 
+/// 非负整数输入校验；[emptyHint] 描述留空 / 0 的含义。
+String? _validateNonNegativeInt(String? value, String emptyHint) {
+  final v = (value ?? '').trim();
+  if (v.isEmpty) return null;
+  final n = int.tryParse(v);
+  if (n == null || n < 0) return '请输入非负整数，$emptyHint';
+  return null;
+}
+
 /// 上游服务器编辑器，对应 `pkg/webserver/types.Upstream`。
 class UpstreamListField extends StatefulWidget {
   const UpstreamListField({
@@ -187,15 +196,22 @@ class _UpstreamCardState extends State<_UpstreamCard> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: TextField(
+                        child: TextFormField(
                           controller: _keepalive,
                           keyboardType: TextInputType.number,
+                          autovalidateMode:
+                              AutovalidateMode.onUserInteraction,
                           decoration: const InputDecoration(
                             labelText: '保持连接数',
                             hintText: '0',
                           ),
+                          validator: (value) =>
+                              _validateNonNegativeInt(value, '留空或 0 表示不保持连接'),
                           onChanged: (v) {
-                            u.keepalive = int.tryParse(v.trim()) ?? 0;
+                            final t = v.trim();
+                            final n = t.isEmpty ? 0 : int.tryParse(t);
+                            // 非法输入不写回模型，由 validator 提示用户修正。
+                            if (n != null && n >= 0) u.keepalive = n;
                             widget.onChanged();
                           },
                         ),
@@ -443,16 +459,23 @@ class _ProxyCardState extends State<_ProxyCard> {
                       },
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    TextFormField(
                       controller: _bodySize,
                       keyboardType: TextInputType.number,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
                       decoration: const InputDecoration(
                         labelText: '请求体大小限制（字节）',
                         hintText: '0 表示使用全局配置',
                       ),
+                      validator: (value) =>
+                          _validateNonNegativeInt(value, '留空或 0 表示使用全局配置'),
                       onChanged: (v) {
-                        p.extra['client_max_body_size'] =
-                            int.tryParse(v.trim()) ?? 0;
+                        final t = v.trim();
+                        final n = t.isEmpty ? 0 : int.tryParse(t);
+                        // 非法输入不写回模型，由 validator 提示用户修正。
+                        if (n != null && n >= 0) {
+                          p.extra['client_max_body_size'] = n;
+                        }
                         widget.onChanged();
                       },
                     ),

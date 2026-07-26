@@ -67,10 +67,9 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
       if (!mounted) return;
       final url = ref.read(fileRepoProvider).shareDownloadUrl(share);
       await showShareLinkDialog(context, url: url);
-    } on ApiException catch (e) {
-      _snack(e.message, error: true);
     } catch (e) {
-      _snack('$e', error: true);
+      // describeError：非 ApiException 时避免露出原始英文异常。
+      _snack(describeError(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -89,10 +88,9 @@ class _FileSharesPageState extends ConsumerState<FileSharesPage> {
     try {
       await ref.read(fileSharesProvider.notifier).remove(share.id);
       _snack('分享已取消');
-    } on ApiException catch (e) {
-      _snack(e.message, error: true);
     } catch (e) {
-      _snack('$e', error: true);
+      // describeError：非 ApiException 时避免露出原始英文异常。
+      _snack(describeError(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

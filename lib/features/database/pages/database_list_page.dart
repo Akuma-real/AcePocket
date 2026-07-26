@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
 import '../../../core/widgets/confirm_dialog.dart';
+import '../../../core/widgets/not_installed_view.dart';
 import '../models/database.dart';
 import '../models/db_types.dart';
 import '../providers/database_providers.dart';
@@ -154,31 +155,51 @@ class _DatabaseListPageState extends ConsumerState<DatabaseListPage> {
               icon: const Icon(Icons.add),
               label: const Text('创建数据库'),
             ),
-      body: server == null
-          ? const NoServerView()
-          : PagedListView<Database>(
-              state: ref.watch(databaseListProvider(_type)),
-              onRefresh: _refresh,
-              onLoadMore: () => _notifier.loadMore(),
-              onRetry: () => ref.invalidate(databaseListProvider(_type)),
-              emptyMessage: _type.isEmpty
-                  ? '暂无数据库\n可先在「数据库服务器」中添加服务器'
-                  : '暂无 ${dbTypeLabel(_type)} 数据库',
-              emptyIcon: Icons.storage_outlined,
-              emptyAction: FilledButton.icon(
-                onPressed: _create,
-                icon: const Icon(Icons.add),
-                label: const Text('创建数据库'),
-              ),
-              itemBuilder: (context, database, index) => DatabaseTile(
-                database: database,
-                onDelete: () => _delete(database),
-                onChangePassword: () => _changePassword(database),
-                onEditComment: dbTypeSupportsComment(database.type)
-                    ? () => _editComment(database)
-                    : null,
-              ),
-            ),
+      body: server == null ? const NoServerView() : _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    final state = ref.watch(databaseListProvider(_type));
+    // 列表加载失败时探测是否已安装数据库应用：未安装展示专门空态
+    // （而不是把面板的原始报错丢给用户）；探测失败则回退到通用错误视图。
+    if (state.hasError && !state.isLoading) {
+      final installed = ref.watch(databaseAppInstalledProvider);
+      if (installed.valueOrNull == false) {
+        return NotInstalledView(
+          title: '未安装数据库服务',
+          message: '数据库管理需要面板已安装 MySQL、PostgreSQL 或 ClickHouse '
+              '等数据库应用，请先到应用商店安装后再使用本功能。',
+          icon: Icons.storage_outlined,
+          onRecheck: () {
+            ref.invalidate(databaseAppInstalledProvider);
+            ref.invalidate(databaseListProvider(_type));
+          },
+        );
+      }
+    }
+    return PagedListView<Database>(
+      state: state,
+      onRefresh: _refresh,
+      onLoadMore: () => _notifier.loadMore(),
+      onRetry: () => ref.invalidate(databaseListProvider(_type)),
+      emptyMessage: _type.isEmpty
+          ? '暂无数据库\n可先在「数据库服务器」中添加服务器'
+          : '暂无 ${dbTypeLabel(_type)} 数据库',
+      emptyIcon: Icons.storage_outlined,
+      emptyAction: FilledButton.icon(
+        onPressed: _create,
+        icon: const Icon(Icons.add),
+        label: const Text('创建数据库'),
+      ),
+      itemBuilder: (context, database, index) => DatabaseTile(
+        database: database,
+        onDelete: () => _delete(database),
+        onChangePassword: () => _changePassword(database),
+        onEditComment: dbTypeSupportsComment(database.type)
+            ? () => _editComment(database)
+            : null,
+      ),
     );
   }
 }

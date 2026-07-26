@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -35,6 +36,13 @@ class _CertCreatePageState extends ConsumerState<CertCreatePage> {
     if (_domains.isEmpty) {
       showSnack(context, '请至少填写一个域名', error: true);
       return;
+    }
+    for (final domain in _domains) {
+      final error = validateDomain(domain);
+      if (error != null) {
+        showSnack(context, '域名 $domain：$error', error: true);
+        return;
+      }
     }
     final hasWildcard = _domains.any((d) => d.contains('*'));
     if (hasWildcard && _dnsId == 0) {

@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
 import '../models/cert.dart';
 import '../providers/cert_providers.dart';
+import '../utils/pem_validation.dart';
 import '../widgets/alias_list_field.dart';
 import '../widgets/domain_list_field.dart';
 import '../widgets/snack.dart';
@@ -84,14 +86,28 @@ class _CertEditFormState extends ConsumerState<_CertEditForm> {
   }
 
   Future<void> _submit() async {
-    if (_domains.isEmpty && !_isUpload) {
-      showSnack(context, '请至少填写一个域名', error: true);
-      return;
+    if (!_isUpload) {
+      if (_domains.isEmpty) {
+        showSnack(context, '请至少填写一个域名', error: true);
+        return;
+      }
+      for (final domain in _domains) {
+        final error = validateDomain(domain);
+        if (error != null) {
+          showSnack(context, '域名 $domain：$error', error: true);
+          return;
+        }
+      }
     }
     if (_isUpload) {
-      if (_certController.text.trim().isEmpty ||
-          _keyController.text.trim().isEmpty) {
-        showSnack(context, '请填写证书与私钥内容', error: true);
+      final certError = validatePemCertificate(_certController.text);
+      if (certError != null) {
+        showSnack(context, certError, error: true);
+        return;
+      }
+      final keyError = validatePemPrivateKey(_keyController.text);
+      if (keyError != null) {
+        showSnack(context, keyError, error: true);
         return;
       }
       if (_autoRenewal) {

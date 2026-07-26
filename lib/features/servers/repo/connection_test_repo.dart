@@ -59,9 +59,11 @@ class ConnectionTestRepo {
         data is Map<String, dynamic> ? data : const <String, dynamic>{},
       );
     } on ApiException catch (e) {
+      // 用 panelMessage（面板原始 msg）组织定制文案，
+      // 避免嵌套 ApiClient 对 401/403 的通用「无权访问」包装。
       if (e.isUnauthorized) {
         throw ApiException(
-          '面板可达，但令牌验证失败：${e.message}\n'
+          '面板可达，但令牌验证失败：${e.panelMessage ?? '面板返回 HTTP 401'}\n'
           '请检查令牌 ID 与令牌是否正确、令牌是否已过期，'
           '以及手机时间是否准确（签名有效期 300 秒）。',
           statusCode: e.statusCode,
@@ -69,7 +71,7 @@ class ConnectionTestRepo {
       }
       if (e.statusCode == 403) {
         throw ApiException(
-          '面板可达，但访问被拒绝：${e.message}\n'
+          '面板可达，但访问被拒绝：${e.panelMessage ?? '面板返回 HTTP 403'}\n'
           '请检查该令牌的 IP 白名单设置。',
           statusCode: e.statusCode,
         );

@@ -13,11 +13,25 @@ import '../widgets/toolbox_tiles.dart';
 ///
 /// 接口见 `internal/route/toolbox_benchmark.go`（POST `/toolbox_benchmark/test`），
 /// 每次只跑一个项目，页面按顺序串行发起请求并实时展示进度。
-class BenchmarkPage extends ConsumerWidget {
+/// 用户点「停止测试」或退出页面时会真正取消在途请求（服务器侧
+/// 当前项目仍会执行完，但客户端不再等待）。
+class BenchmarkPage extends ConsumerStatefulWidget {
   const BenchmarkPage({super.key});
 
+  @override
+  ConsumerState<BenchmarkPage> createState() => _BenchmarkPageState();
+}
+
+class _BenchmarkPageState extends ConsumerState<BenchmarkPage> {
   static BenchmarkTest _testOf(String key) =>
       kBenchmarkTests.firstWhere((t) => t.key == key);
+
+  @override
+  void dispose() {
+    // 退出页面时取消在途的跑分请求，避免最长 10 分钟的阻塞 POST 白跑。
+    ref.read(benchmarkProvider.notifier).cancelOngoing();
+    super.dispose();
+  }
 
   Future<void> _start(BuildContext context, WidgetRef ref) async {
     final confirmed = await showConfirmDialog(
@@ -42,7 +56,7 @@ class BenchmarkPage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final state = ref.watch(benchmarkProvider);
     final notifier = ref.read(benchmarkProvider.notifier);
@@ -96,7 +110,7 @@ class BenchmarkPage extends ConsumerWidget {
               ? OutlinedButton.icon(
                   onPressed: state.stopping ? null : notifier.stop,
                   icon: const Icon(Icons.stop_circle_outlined),
-                  label: Text(state.stopping ? '当前项目完成后停止…' : '停止测试'),
+                  label: Text(state.stopping ? '正在停止…' : '停止测试'),
                 )
               : FilledButton.icon(
                   onPressed: () => _start(context, ref),
@@ -165,8 +179,8 @@ class BenchmarkPage extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '面板逐项执行测试，单项完成前无法中断；'
-            '若某项超时失败，可在下方单独重测。',
+            '面板逐项执行测试；停止测试或退出页面会立即取消等待，'
+            '但服务器上当前项目仍会执行完。若某项超时失败，可在下方单独重测。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

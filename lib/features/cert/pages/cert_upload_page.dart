@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/section_card.dart';
 import '../providers/cert_providers.dart';
+import '../utils/pem_validation.dart';
 import '../widgets/snack.dart';
 
 /// 上传自有证书页 `/certs/upload`。
@@ -32,17 +33,14 @@ class _CertUploadPageState extends ConsumerState<CertUploadPage> {
   Future<void> _submit() async {
     final cert = _certController.text.trim();
     final key = _keyController.text.trim();
-    if (cert.isEmpty || key.isEmpty) {
-      showSnack(context, '请填写证书与私钥内容', error: true);
+    final certError = validatePemCertificate(cert);
+    if (certError != null) {
+      showSnack(context, certError, error: true);
       return;
     }
-    if (!cert.contains('BEGIN CERTIFICATE')) {
-      showSnack(context, '证书内容应为 PEM 格式（以 -----BEGIN CERTIFICATE----- 开头）',
-          error: true);
-      return;
-    }
-    if (!key.contains('BEGIN')) {
-      showSnack(context, '私钥内容应为 PEM 格式', error: true);
+    final keyError = validatePemPrivateKey(key);
+    if (keyError != null) {
+      showSnack(context, keyError, error: true);
       return;
     }
 

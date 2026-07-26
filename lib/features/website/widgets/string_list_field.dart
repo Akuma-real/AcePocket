@@ -16,6 +16,7 @@ class StringListField extends StatefulWidget {
     this.keyboardType,
     this.helperText,
     this.itemPrefixIcon,
+    this.validator,
   });
 
   final String label;
@@ -34,6 +35,10 @@ class StringListField extends StatefulWidget {
   final TextInputType? keyboardType;
   final String? helperText;
   final IconData? itemPrefixIcon;
+
+  /// 单条内容的校验器（入参已 trim 且非空）；返回 null 表示通过。
+  /// 空条目在 [onChanged] 时会被过滤，因此这里不校验空值。
+  final String? Function(String value)? validator;
 
   @override
   State<StringListField> createState() => _StringListFieldState();
@@ -104,15 +109,23 @@ class _StringListFieldState extends State<StringListField> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: TextFormField(
                     controller: _controllers[i],
                     keyboardType: widget.keyboardType,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     decoration: InputDecoration(
                       hintText: widget.hintText,
                       prefixIcon: widget.itemPrefixIcon == null
                           ? null
                           : Icon(widget.itemPrefixIcon, size: 18),
                     ),
+                    validator: widget.validator == null
+                        ? null
+                        : (value) {
+                            final v = (value ?? '').trim();
+                            if (v.isEmpty) return null;
+                            return widget.validator!(v);
+                          },
                     onChanged: (_) => _emit(),
                   ),
                 ),

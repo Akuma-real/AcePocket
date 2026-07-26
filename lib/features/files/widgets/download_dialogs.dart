@@ -116,10 +116,9 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
       outcome = DownloadOutcome(file: file);
     } on TransferCancelledException {
       outcome = const DownloadOutcome(cancelled: true);
-    } on ApiException catch (e) {
-      outcome = DownloadOutcome(error: e.message);
     } catch (e) {
-      outcome = DownloadOutcome(error: '$e');
+      // describeError：非 ApiException 时避免露出原始英文异常。
+      outcome = DownloadOutcome(error: describeError(e));
     }
     _finished = true;
     _ticker?.cancel();

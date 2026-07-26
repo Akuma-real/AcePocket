@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../apps/repo/apps_repo.dart';
 import '../models/database.dart';
 import '../models/database_server.dart';
 import '../models/database_user.dart';
@@ -10,6 +11,17 @@ import 'paged_state.dart';
 /// 数据库模块仓库（依赖当前选中的面板服务器）。
 final databaseRepoProvider = Provider<DatabaseRepo>((ref) {
   return DatabaseRepo(ref.watch(apiClientProvider));
+});
+
+/// 是否已安装任一数据库应用（MySQL / PostgreSQL / ClickHouse）：
+/// `GET /app/is_installed`。
+///
+/// 仅在数据库列表加载失败时用于区分「未安装」与其他错误，
+/// 从而展示带「去应用商店安装」入口的专门空态；
+/// 检测请求本身失败时由页面回退到通用错误视图。
+final databaseAppInstalledProvider = FutureProvider.autoDispose<bool>((ref) {
+  return AppsRepo(ref.watch(apiClientProvider))
+      .isInstalled(const ['mysql', 'postgresql', 'clickhouse']);
 });
 
 /// 拉取全部数据库服务器（用于表单里的服务器下拉选择）。

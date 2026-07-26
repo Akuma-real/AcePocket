@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
@@ -105,6 +106,13 @@ class _NotifyChannelFormPageState
     if (recipients.isEmpty) {
       showSnack(context, '请至少填写一个收件人', error: true);
       return;
+    }
+    for (final recipient in recipients) {
+      final error = validateEmail(recipient);
+      if (error != null) {
+        showSnack(context, '收件人 $recipient：$error', error: true);
+        return;
+      }
     }
 
     final config = SmtpConfig(
@@ -254,8 +262,13 @@ class _NotifyChannelFormPageState
             autocorrect: false,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
-            validator: (value) =>
-                (value == null || value.trim().isEmpty) ? '请填写 SMTP 服务器地址' : null,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            validator: (value) {
+              final v = (value ?? '').trim();
+              if (v.isEmpty) return '请填写 SMTP 服务器地址';
+              // 只填主机名或 IP，validateDomain 的文案会提示去掉协议前缀/端口。
+              return validateDomain(v, allowWildcard: false);
+            },
           ),
           const SizedBox(height: 16),
           Text(
@@ -376,6 +389,12 @@ class _NotifyChannelFormPageState
             autocorrect: false,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            validator: (value) {
+              final v = (value ?? '').trim();
+              if (v.isEmpty) return null;
+              return validateEmail(v);
+            },
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -394,6 +413,7 @@ class _NotifyChannelFormPageState
             hint: 'ops@example.com',
             keyboardType: TextInputType.emailAddress,
             initialValues: _recipients,
+            validator: validateEmail,
             onChanged: (values) => _recipients = values,
           ),
         ],

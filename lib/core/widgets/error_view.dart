@@ -12,13 +12,9 @@ class ErrorView extends StatelessWidget {
   final Object error;
   final VoidCallback? onRetry;
 
-  String get _message {
-    final e = error;
-    if (e is ApiException) return e.message;
-    final text = e.toString();
-    // 去掉 "Exception: " 等常见前缀，保持展示友好。
-    return text.replaceFirst(RegExp(r'^\w+Exception:\s*'), '');
-  }
+  // describeError：ApiException 取 message，其他异常去掉
+  // "Exception: " 等常见前缀，保持展示友好。
+  String get _message => describeError(error);
 
   @override
   Widget build(BuildContext context) {

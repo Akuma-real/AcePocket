@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/storage/server_store.dart';
+import '../../../core/utils/input_validation.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -127,10 +129,8 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
           _snack(success);
         }
       }
-    } on ApiException catch (e) {
-      _snack(e.message, error: true);
     } catch (e) {
-      _snack('$e', error: true);
+      _snack(describeError(e), error: true);
     } finally {
       // 无论成功还是部分失败都刷新列表，保证展示与服务端一致。
       if (mounted) {
@@ -188,7 +188,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       title: dir ? '新建文件夹' : '新建文件',
       label: '名称',
       helperText: '将创建在 $_path',
-      validator: (value) => value.contains('/') ? '名称不能包含 /' : null,
+      validator: validateFileName,
     );
     if (name == null || !mounted) return;
     final target = posixJoin(_path, name);
@@ -208,7 +208,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
       title: '重命名',
       initialValue: item.name,
       selectBaseName: !item.dir,
-      validator: (value) => value.contains('/') ? '名称不能包含 /' : null,
+      validator: validateFileName,
     );
     if (name == null || name == item.name || !mounted) return;
     final target = posixJoin(posixParent(item.full), name);
@@ -289,6 +289,13 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
   Future<void> _paste() async {
     final clip = ref.read(fileClipboardProvider);
     if (clip == null || clip.paths.isEmpty) return;
+    // 兜底校验：剪贴板内容必须来自当前服务器（切换服务器时 provider 已清空，
+    // 此处防御性拦截，避免把其他服务器的路径下发给当前服务器执行）。
+    if (clip.serverId != ref.read(activeServerProvider)?.id) {
+      ref.read(fileClipboardProvider.notifier).clear();
+      _snack('剪贴板中的文件来自其他服务器，已清空，请重新复制', error: true);
+      return;
+    }
     final targets = <FileTransferItem>[];
     for (final source in clip.paths) {
       final target = posixJoin(_path, posixBaseName(source));
@@ -481,7 +488,7 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
         withReadStream: false,
       );
     } catch (e) {
-      _snack('打开文件选择器失败：$e', error: true);
+      _snack('打开文件选择器失败：${describeError(e)}', error: true);
       return;
     }
     if (picked == null || picked.files.isEmpty || !mounted) return;
@@ -577,13 +584,9 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
             await source.close();
         }
       }
-    } on ApiException catch (e) {
-      await closeAll();
-      _snack(e.message, error: true);
-      return;
     } catch (e) {
       await closeAll();
-      _snack('$e', error: true);
+      _snack(describeError(e), error: true);
       return;
     }
 
@@ -708,11 +711,50 @@ class _FileBrowserPageState extends ConsumerState<FileBrowserPage> {
     _navigateTo(path);
   }
 
+  /// 编辑器打开前的大小预检阈值：超过 1MB 提示可能卡顿，由用户确认。
+  static const int _editorWarnBytes = 1024 * 1024;
+
+  /// 面板 `GET /api/file/content` 拒绝返回内容的大小上限（10MB），
+  /// 超过时直接拒绝进入编辑器。
+  static const int _editorRejectBytes = 10 * 1024 * 1024;
+
   Future<void> _openItem(FileItem item) async {
     if (item.dir) {
       _navigateTo(item.full);
       return;
     }
+    // 按列表返回的大小预检，避免把大文件整个塞进编辑器导致卡死。
+    final bytes = parseFormattedSize(item.size);
+    if (bytes != null && bytes > _editorRejectBytes) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('文件过大，无法编辑'),
+          content: Text(
+            '「${item.name}」大小为 ${item.size}，超过面板 10MB 的在线编辑上限，'
+            '面板会拒绝返回文件内容。请下载到本地后编辑。',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (bytes != null && bytes > _editorWarnBytes) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '文件较大',
+        content: '「${item.name}」大小为 ${item.size}，'
+            '文件较大，编辑器可能卡顿，建议下载后用电脑编辑。仍要继续打开吗？',
+        confirmText: '继续打开',
+      );
+      if (!ok) return;
+    }
+    if (!mounted) return;
     await context.push(
       '/files/edit?path=${Uri.encodeQueryComponent(item.full)}',
     );
