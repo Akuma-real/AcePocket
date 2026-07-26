@@ -4,9 +4,12 @@ import 'package:go_router/go_router.dart';
 
 import '../models/server.dart';
 import '../storage/server_store.dart';
+import '../usage/more_usage_providers.dart';
+import '../usage/more_usage_store.dart';
 import '../version/panel_feature.dart';
 import '../version/panel_version_provider.dart';
 import '../widgets/section_card.dart';
+import 'more_page_search.dart';
 
 /// 「更多」页中的一个功能入口。
 class MoreEntry {
@@ -338,18 +341,91 @@ const List<MoreGroup> kMoreGroups = <MoreGroup>[
   ),
 ];
 
-/// 「更多」tab：当前服务器信息 + 全部功能入口（分组宫格）。
-class MorePage extends ConsumerWidget {
+/// 入口不可用时的徽标文案：「需 v3.3.0」/「即将支持」/「不可用」。
+///
+/// 宫格与搜索结果行共用，保持两处文案一致。
+String moreEntryBadgeText(PanelFeature feature) {
+  final required = requiredVersionOf(feature);
+  if (required == null) return '不可用';
+  if (required == kUnreleasedVersion) return '即将支持';
+  return '需 v${required.major}.${required.minor}.${required.patch}';
+}
+
+/// 「更多」tab：搜索框 + 当前服务器信息 + 常用分组 + 全部功能入口（分组宫格）。
+class MorePage extends ConsumerStatefulWidget {
   const MorePage({super.key, this.groups = kMoreGroups});
 
   final List<MoreGroup> groups;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final server = ref.watch(activeServerProvider);
-    final serversAsync = ref.watch(serverListProvider);
-    final servers = serversAsync.valueOrNull ?? const <ServerConfig>[];
-    final panelVersion = ref.watch(cachedPanelVersionProvider);
+  ConsumerState<MorePage> createState() => _MorePageState();
+}
+
+class _MorePageState extends ConsumerState<MorePage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  /// 当前搜索词（未 trim 的原始输入，展示与过滤时再 trim）。
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// 打开一个入口（宫格与搜索结果共用）。
+  ///
+  /// 支持时按 [MoreEntry.isTab] 选择 go / push 并记一次使用计数；
+  /// 不支持时仅弹 SnackBar 提示，不计数。
+  void _openEntry(MoreEntry entry) {
+    final panelVersion = ref.read(cachedPanelVersionProvider);
+    // 面板版本未知（panelVersion 为 null）时 isFeatureSupported 恒为
+    // true，即一切照常、不加任何限制。
+    final supported = entry.feature == null ||
+        isFeatureSupported(entry.feature!, panelVersion);
+    if (!supported) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              featureUnsupportedMessage(entry.feature!, panelVersion),
+            ),
+          ),
+        );
+      return;
+    }
+    // tab 根路由必须 go 切换分支，其余页面 push 压栈。
+    if (entry.isTab) {
+      context.go(entry.path);
+    } else {
+      context.push(entry.path);
+    }
+    // 只有真正跳转时才计数（持久化异步进行，无需等待）。
+    ref.read(moreUsageProvider.notifier).recordTap(entry.path);
+  }
+
+  /// 由使用记录算出「常用」入口列表。
+  ///
+  /// 先剔除不在 [MorePage.groups] 里的 path（如已下线的入口），
+  /// 再交给 [topUsagePaths] 排序截断；不足门槛时返回空列表。
+  List<MoreEntry> _frequentEntries(Map<String, MoreUsageRecord> records) {
+    final entryByPath = <String, MoreEntry>{
+      for (final group in widget.groups)
+        for (final entry in group.entries) entry.path: entry,
+    };
+    final known = <String, MoreUsageRecord>{
+      for (final record in records.entries)
+        if (entryByPath.containsKey(record.key)) record.key: record.value,
+    };
+    return <MoreEntry>[
+      for (final path in topUsagePaths(known)) entryByPath[path]!,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final searching = _query.trim().isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -362,21 +438,203 @@ class MorePage extends ConsumerWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(top: 6, bottom: 24),
+      // 搜索框固定在列表外侧，滚动 / 切换结果时不丢失焦点。
+      body: Column(
         children: [
-          _ActiveServerCard(server: server, serverCount: servers.length),
-          for (final group in groups)
-            SectionCard(
-              title: group.title,
-              child: _EntryGrid(
-                entries: group.entries,
-                panelVersion: panelVersion,
-              ),
-            ),
+          _buildSearchField(context),
+          Expanded(
+            child: searching ? _buildSearchBody(context) : _buildNormalBody(),
+          ),
         ],
       ),
     );
+  }
+
+  /// 顶部搜索框。
+  Widget _buildSearchField(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      child: TextField(
+        controller: _searchController,
+        textInputAction: TextInputAction.search,
+        onChanged: (value) => setState(() => _query = value),
+        // 回车不做任何导航，防止误跳转；结果列表本身随输入实时更新。
+        onSubmitted: (_) {},
+        decoration: InputDecoration(
+          hintText: '搜索功能，如：防火墙 / fhq',
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _query.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: '清空',
+                  icon: const Icon(Icons.clear_rounded),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _query = '');
+                  },
+                ),
+          filled: true,
+          fillColor: theme.colorScheme.surfaceContainerHigh,
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 无搜索词时的正常内容：服务器卡片 + 常用分组 + 全部分组宫格。
+  Widget _buildNormalBody() {
+    final server = ref.watch(activeServerProvider);
+    final serversAsync = ref.watch(serverListProvider);
+    final servers = serversAsync.valueOrNull ?? const <ServerConfig>[];
+    final panelVersion = ref.watch(cachedPanelVersionProvider);
+    final frequent = _frequentEntries(ref.watch(moreUsageProvider));
+
+    return ListView(
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      children: [
+        _ActiveServerCard(server: server, serverCount: servers.length),
+        if (frequent.isNotEmpty)
+          SectionCard(
+            title: '常用',
+            child: _EntryGrid(
+              entries: frequent,
+              panelVersion: panelVersion,
+              onOpen: _openEntry,
+            ),
+          ),
+        for (final group in widget.groups)
+          SectionCard(
+            title: group.title,
+            child: _EntryGrid(
+              entries: group.entries,
+              panelVersion: panelVersion,
+              onOpen: _openEntry,
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 有搜索词时的结果列表（平铺，不分组）。
+  Widget _buildSearchBody(BuildContext context) {
+    final theme = Theme.of(context);
+    final panelVersion = ref.watch(cachedPanelVersionProvider);
+    final results = filterMoreEntries(widget.groups, _query);
+
+    if (results.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '没有找到与 “${_query.trim()}” 匹配的功能',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      itemCount: results.length,
+      itemBuilder: (context, index) => _SearchResultTile(
+        result: results[index],
+        panelVersion: panelVersion,
+        onOpen: _openEntry,
+      ),
+    );
+  }
+}
+
+/// 搜索结果中的一行：图标 + 标题 + 所属分组，不支持时灰显并带版本徽标。
+class _SearchResultTile extends StatelessWidget {
+  const _SearchResultTile({
+    required this.result,
+    required this.onOpen,
+    this.panelVersion,
+  });
+
+  final MoreSearchResult result;
+
+  /// 点击回调（导航与计数逻辑统一在 MorePage 处理）。
+  final void Function(MoreEntry entry) onOpen;
+
+  /// 当前面板版本（未知时为 null，此时不做任何可用性标注）。
+  final PanelVersion? panelVersion;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final entry = result.entry;
+    final supported = entry.feature == null ||
+        isFeatureSupported(entry.feature!, panelVersion);
+    final unreleased = supported
+        ? false
+        : requiredVersionOf(entry.feature!) == kUnreleasedVersion;
+
+    Widget content = ListTile(
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          entry.icon,
+          size: 22,
+          color: theme.colorScheme.onSecondaryContainer,
+        ),
+      ),
+      title: Text(entry.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        result.groupTitle,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      trailing: supported
+          ? null
+          : Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: unreleased
+                    ? theme.colorScheme.tertiaryContainer
+                    : theme.colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                moreEntryBadgeText(entry.feature!),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: unreleased
+                      ? theme.colorScheme.onTertiaryContainer
+                      : theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+      onTap: () => onOpen(entry),
+    );
+    // 整行灰显；Opacity 不拦截点击，仍可弹「不支持」提示。
+    if (!supported) {
+      content = Opacity(opacity: 0.45, child: content);
+    }
+    return content;
   }
 }
 
@@ -497,31 +755,19 @@ class _ActiveServerCard extends StatelessWidget {
 /// 一组功能入口的宫格（4 列）。
 ///
 /// [panelVersion] 为当前面板版本（未知时为 null，此时不做任何可用性标注）。
+/// 点击一律回调 [onOpen]，导航 / 提示 / 计数逻辑统一在 MorePage 处理。
 class _EntryGrid extends StatelessWidget {
-  const _EntryGrid({required this.entries, this.panelVersion});
+  const _EntryGrid({
+    required this.entries,
+    required this.onOpen,
+    this.panelVersion,
+  });
 
   final List<MoreEntry> entries;
   final PanelVersion? panelVersion;
 
-  /// 入口不可用时的徽标文案：「需 v3.3.0」或「即将支持」。
-  String _badgeText(PanelFeature feature) {
-    final required = requiredVersionOf(feature);
-    if (required == null) return '不可用';
-    if (required == kUnreleasedVersion) return '即将支持';
-    return '需 v${required.major}.${required.minor}.${required.patch}';
-  }
-
-  void _onTapUnsupported(BuildContext context, MoreEntry entry) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            featureUnsupportedMessage(entry.feature!, panelVersion),
-          ),
-        ),
-      );
-  }
+  /// 点击入口的回调。
+  final void Function(MoreEntry entry) onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -585,7 +831,7 @@ class _EntryGrid extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  _badgeText(entry.feature!),
+                  moreEntryBadgeText(entry.feature!),
                   maxLines: 1,
                   style: theme.textTheme.labelSmall?.copyWith(
                     fontSize: 9,
@@ -605,11 +851,7 @@ class _EntryGrid extends StatelessWidget {
 
         return InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: supported
-              ? () => entry.isTab
-                  ? context.go(entry.path)
-                  : context.push(entry.path)
-              : () => _onTapUnsupported(context, entry),
+          onTap: () => onOpen(entry),
           child: content,
         );
       },

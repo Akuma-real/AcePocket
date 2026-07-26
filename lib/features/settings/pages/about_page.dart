@@ -7,6 +7,9 @@ import '../../../core/storage/server_store.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/loading_view.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../app_settings/providers/app_settings_providers.dart';
+import '../../app_update/providers/app_update_providers.dart';
+import '../../app_update/widgets/update_dialog.dart';
 import '../models/panel_about.dart';
 import '../providers/settings_providers.dart';
 import '../widgets/setting_fields.dart';
@@ -23,9 +26,10 @@ const String kProjectSiteUrl = 'https://acepanel.net';
 /// API 文档地址。
 const String kProjectApiDocUrl = 'https://acepanel.net/advanced/api';
 
-/// 关于页：纯信息展示（App / 面板版本、开源地址）。
+/// 关于页：App 版本与更新（检查更新、自动检查开关）、面板与系统信息、
+/// 当前服务器、开源地址。
 ///
-/// 外观等 App 偏好设置已移至「应用设置」（`/app-settings`）。
+/// 作为「应用设置」（`/app-settings`）的二级页存在，是版本与更新信息的唯一归属页。
 class AboutPage extends ConsumerWidget {
   const AboutPage({super.key});
 
@@ -60,17 +64,8 @@ class AboutPage extends ConsumerWidget {
           children: [
             const _AppHeader(),
 
-            // ---------------------------------------------------- 应用设置入口
-            SectionCard(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              onTap: () => context.push('/app-settings'),
-              child: const ListTile(
-                leading: Icon(Icons.app_settings_alt_outlined),
-                title: Text('应用设置'),
-                subtitle: Text('主题、启动行为、数据刷新、终端等 App 偏好'),
-                trailing: Icon(Icons.chevron_right),
-              ),
-            ),
+            // ------------------------------------------------------ 版本与更新
+            const _UpdateSection(),
 
             // -------------------------------------------------------- 面板信息
             aboutAsync.when(
@@ -158,12 +153,18 @@ class AboutPage extends ConsumerWidget {
   }
 }
 
-class _AppHeader extends StatelessWidget {
+class _AppHeader extends ConsumerWidget {
   const _AppHeader();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    // 运行时读取实际包版本，读取中 / 失败时回退编译期常量。
+    final version = ref.watch(currentAppVersionProvider).when(
+          data: (v) => v,
+          loading: () => kAppVersion,
+          error: (_, __) => kAppVersion,
+        );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
       child: Column(
@@ -185,10 +186,118 @@ class _AppHeader extends StatelessWidget {
           Text('AcePocket', style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'App 版本 $kAppVersion',
+            'App 版本 $version',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 分区底部的说明文字（bodySmall + onSurfaceVariant）。
+class _SectionNote extends StatelessWidget {
+  const _SectionNote(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Text(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// 「版本与更新」分区：当前版本、自动检查更新开关与手动检查入口。
+class _UpdateSection extends ConsumerStatefulWidget {
+  const _UpdateSection();
+
+  @override
+  ConsumerState<_UpdateSection> createState() => _UpdateSectionState();
+}
+
+class _UpdateSectionState extends ConsumerState<_UpdateSection> {
+  /// 手动检查是否进行中（防重入：检查中禁点并显示进度指示）。
+  bool _checking = false;
+
+  /// 手动触发一次更新检查（无视被跳过的版本，有新版本直接弹窗）。
+  Future<void> _checkForUpdate() async {
+    if (_checking) return;
+    setState(() => _checking = true);
+    try {
+      // AppUpdateChecker.check() 约定绝不抛异常，失败以 status 表达。
+      final result = await ref.read(appUpdateCheckerProvider).check();
+      if (!mounted) return;
+      switch (result.status) {
+        case UpdateCheckStatus.updateAvailable:
+          await showAppUpdateDialog(context, result.release!);
+        case UpdateCheckStatus.upToDate:
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已是最新版本')),
+          );
+        case UpdateCheckStatus.failed:
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('检查更新失败，请检查网络后重试')),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final version = ref.watch(currentAppVersionProvider);
+    final autoCheck = ref.watch(autoCheckUpdateProvider);
+
+    return SectionCard(
+      title: '版本与更新',
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            title: const Text('当前版本'),
+            trailing: Text(
+              version.when(
+                data: (v) => 'v$v',
+                loading: () => '…',
+                error: (_, __) => '未知',
+              ),
+            ),
+          ),
+          SwitchListTile(
+            value: autoCheck,
+            onChanged: (v) {
+              ref.read(autoCheckUpdateProvider.notifier).setEnabled(v);
+            },
+            title: const Text('启动时自动检查更新'),
+            subtitle: const Text('启动后在后台静默检查，发现新版本时提示'),
+          ),
+          ListTile(
+            title: const Text('检查更新'),
+            enabled: !_checking,
+            onTap: _checking ? null : _checkForUpdate,
+            trailing: _checking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+          ),
+          const _SectionNote(
+            '更新检查通过 GitHub Releases 进行，仅在你主动或开启自动检查时发起，不会上传任何数据。',
           ),
         ],
       ),
