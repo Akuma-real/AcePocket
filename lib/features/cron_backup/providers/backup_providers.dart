@@ -1,0 +1,115 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/storage/server_store.dart';
+import '../models/backup_file.dart';
+import '../repo/backup_repo.dart';
+import '../repo/backup_transfer.dart';
+import 'options_providers.dart';
+import 'paged_state.dart';
+
+/// 备份仓库（跟随当前选中的服务器变化）。
+final backupRepoProvider = Provider<BackupRepo>((ref) {
+  return BackupRepo(ref.watch(apiClientProvider));
+});
+
+/// 备份上传客户端（流式 multipart，见 [BackupUploader]）。
+///
+/// 下载复用 files 模块的 `panelTransferClientProvider`
+/// （[PanelTransferClient.downloadBackup] 本身即流式），
+/// 上传因备份接口没有分片入口、整体读入会 OOM，另用流式实现。
+final backupUploaderProvider = Provider<BackupUploader>((ref) {
+  final server = ref.watch(activeServerProvider);
+  if (server == null) {
+    throw StateError('尚未选择服务器');
+  }
+  return BackupUploader(server);
+});
+
+/// 每页条数。
+const kBackupPageSize = 20;
+
+/// 备份文件列表（按类型分页）。
+final backupListProvider = AsyncNotifierProvider.autoDispose
+    .family<BackupListNotifier, PagedState<BackupFile>, String>(
+        BackupListNotifier.new);
+
+class BackupListNotifier
+    extends AutoDisposeFamilyAsyncNotifier<PagedState<BackupFile>, String> {
+  @override
+  Future<PagedState<BackupFile>> build(String arg) async {
+    final repo = ref.watch(backupRepoProvider);
+    final result =
+        await repo.list(type: arg, page: 1, limit: kBackupPageSize);
+    return PagedState(items: result.items, total: result.total, page: 1);
+  }
+
+  Future<void> refresh() async {
+    final repo = ref.read(backupRepoProvider);
+    state = await AsyncValue.guard(() async {
+      final result =
+          await repo.list(type: arg, page: 1, limit: kBackupPageSize);
+      return PagedState<BackupFile>(
+        items: result.items,
+        total: result.total,
+        page: 1,
+      );
+    });
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.loadingMore || !current.hasMore) return;
+    state = AsyncData(current.copyWith(loadingMore: true));
+    try {
+      final repo = ref.read(backupRepoProvider);
+      final next = current.page + 1;
+      final result =
+          await repo.list(type: arg, page: next, limit: kBackupPageSize);
+      final merged = [...current.items, ...result.items];
+      state = AsyncData(PagedState<BackupFile>(
+        items: merged,
+        // 空页即视为到底，避免 total 与实际条数不一致时反复触发「加载更多」。
+        total: result.items.isEmpty ? merged.length : result.total,
+        page: next,
+      ));
+    } catch (_) {
+      state = AsyncData(current.copyWith(loadingMore: false));
+      rethrow;
+    }
+  }
+
+  /// 删除备份文件（成功后从列表移除）。
+  Future<void> delete(BackupFile file) async {
+    await ref.read(backupRepoProvider).delete(type: arg, file: file.name);
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final items = current.items.where((e) => e.name != file.name).toList();
+    state = AsyncData(current.copyWith(
+      items: items,
+      total: current.total > 0 ? current.total - 1 : 0,
+    ));
+  }
+}
+
+/// 备份页可展示的类型标签（按面板已安装的环境过滤）。
+///
+/// 检测失败时退回展示全部类型，保证功能可用。
+final backupTypeTabsProvider = FutureProvider.autoDispose<List<String>>((ref) async {
+  const fallback = BackupTypes.listable;
+  try {
+    final dbTypes = await ref.watch(installedDatabaseTypesProvider.future);
+    final redis = await ref.watch(appInstalledProvider('redis').future);
+    final valkey = await ref.watch(appInstalledProvider('valkey').future);
+    final tabs = <String>[BackupTypes.website];
+    for (final t in BackupTypes.databaseTypes) {
+      if (dbTypes.contains(t)) tabs.add(t);
+    }
+    if (redis) tabs.add(BackupTypes.redis);
+    if (valkey) tabs.add(BackupTypes.valkey);
+    tabs.add(BackupTypes.panel);
+    tabs.add(BackupTypes.path);
+    return tabs;
+  } catch (_) {
+    return fallback;
+  }
+});

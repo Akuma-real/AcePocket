@@ -1,0 +1,11 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: false
+    strict-inference: false
+
+linter:
+  rules:
+    prefer_single_quotes: true
+    unawaited_futures: false
