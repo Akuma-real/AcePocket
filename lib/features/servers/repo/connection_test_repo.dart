@@ -1,5 +1,6 @@
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_exception.dart';
+import '../../../core/api/panel_http_client.dart';
 import '../../../core/models/server.dart';
 import '../models/connection_test.dart';
 
@@ -41,6 +42,11 @@ class ConnectionTestRepo {
         );
       }
       rethrow;
+    } on CertificateTrustRequiredException {
+      // TOFU：证书待确认，原样上抛，由表单 / 测试流程弹窗让用户确认。
+      rethrow;
+    } on CertificateMismatchException {
+      rethrow;
     } catch (e) {
       throw ApiException('连接面板失败：$e');
     }
@@ -68,6 +74,10 @@ class ConnectionTestRepo {
           statusCode: e.statusCode,
         );
       }
+      rethrow;
+    } on CertificateTrustRequiredException {
+      rethrow;
+    } on CertificateMismatchException {
       rethrow;
     } catch (e) {
       throw ApiException('获取系统信息失败：$e');

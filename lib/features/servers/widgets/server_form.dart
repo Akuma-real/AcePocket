@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/panel_http_client.dart';
 import '../../../core/models/server.dart';
 import '../../../core/utils/url_validation.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/connection_test.dart';
 import '../providers/servers_providers.dart';
+import 'certificate_trust_dialog.dart';
 import 'connection_test_result_card.dart';
 
 /// 服务器配置表单（初次配置引导 / 添加 / 编辑共用）。
@@ -54,6 +56,11 @@ class _ServerFormState extends ConsumerState<ServerForm> {
   late final TextEditingController _passwordController;
 
   late bool _allowSelfSigned;
+
+  /// 已信任的证书 SHA-256 指纹（TOFU）；空串表示尚未信任。
+  /// 连接测试遇到 [CertificateTrustRequiredException] 且用户确认后写入，
+  /// 随表单一起保存到 [ServerConfig.pinnedCertSha256]。
+  late String _pinnedCertSha256;
   late bool _showAdvanced;
   bool _obscureToken = true;
   bool _obscurePassword = true;
@@ -77,6 +84,7 @@ class _ServerFormState extends ConsumerState<ServerForm> {
     _usernameController = TextEditingController(text: initial?.username ?? '');
     _passwordController = TextEditingController(text: initial?.password ?? '');
     _allowSelfSigned = initial?.allowSelfSigned ?? false;
+    _pinnedCertSha256 = initial?.pinnedCertSha256 ?? '';
     _showAdvanced = widget.autoExpandAdvanced ||
         (initial != null &&
             (initial.entrance.isNotEmpty ||
@@ -104,6 +112,7 @@ class _ServerFormState extends ConsumerState<ServerForm> {
       tokenId: _tokenIdController.text.trim(),
       token: _tokenController.text.trim(),
       allowSelfSigned: _allowSelfSigned,
+      pinnedCertSha256: _pinnedCertSha256,
       entrance: _entranceController.text.trim(),
       username: _usernameController.text.trim(),
       password: _passwordController.text,
@@ -122,21 +131,38 @@ class _ServerFormState extends ConsumerState<ServerForm> {
   Future<ConnectionTestResult?> _runTest() async {
     if (!(_formKey.currentState?.validate() ?? false)) return null;
     FocusScope.of(context).unfocus();
-    setState(() {
-      _testing = true;
-      _testResult = null;
-      _testError = null;
-    });
-    try {
-      final result =
-          await ref.read(connectionTestRepoProvider).test(_buildConfig());
-      if (mounted) setState(() => _testResult = result);
-      return result;
-    } catch (e) {
-      if (mounted) setState(() => _testError = e);
+    // 循环以支持 TOFU：首次遇到未信任的证书时弹窗确认，
+    // 用户信任后固定指纹并自动重试一次连接测试。
+    while (true) {
+      setState(() {
+        _testing = true;
+        _testResult = null;
+        _testError = null;
+      });
+      Object? error;
+      try {
+        final result =
+            await ref.read(connectionTestRepoProvider).test(_buildConfig());
+        if (mounted) setState(() => _testResult = result);
+        return result;
+      } catch (e) {
+        error = e;
+      } finally {
+        if (mounted) setState(() => _testing = false);
+      }
+      if (!mounted) return null;
+      if (error is CertificateTrustRequiredException) {
+        final trusted =
+            await showCertificateTrustDialog(context, error.certificate);
+        if (!mounted) return null;
+        if (trusted) {
+          final fingerprint = error.certificate.sha256Hex;
+          setState(() => _pinnedCertSha256 = fingerprint);
+          continue; // 指纹已固定，重试连接测试。
+        }
+      }
+      setState(() => _testError = error);
       return null;
-    } finally {
-      if (mounted) setState(() => _testing = false);
     }
   }
 
@@ -279,9 +305,59 @@ class _ServerFormState extends ConsumerState<ServerForm> {
                     _invalidateTestResult();
                   },
             title: const Text('允许自签名证书'),
-            subtitle: const Text('面板使用自签名 / 无效 HTTPS 证书时开启'),
+            subtitle: const Text('面板使用自签名 / 无效 HTTPS 证书时开启。'
+                '首次连接需确认证书指纹（TOFU），之后证书变化将拒绝连接'),
             contentPadding: EdgeInsets.zero,
           ),
+          if (_pinnedCertSha256.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.verified_user_outlined,
+                      size: 18, color: colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '已记住服务器证书指纹（SHA-256）',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatFingerprintGroups(_pinnedCertSha256),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontFamily: 'monospace',
+                            fontFamilyFallback: const ['Courier'],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () {
+                            // 服务器更换证书后从这里清除，重新走 TOFU 确认。
+                            setState(() => _pinnedCertSha256 = '');
+                            _invalidateTestResult();
+                          },
+                    child: const Text('清除'),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 4),
           // ——— 高级选项 ———
           InkWell(

@@ -7,6 +7,7 @@ import 'package:dio/io.dart';
 
 import '../models/server.dart';
 import 'api_exception.dart';
+import 'panel_http_client.dart';
 
 /// AcePanel HTTP API 客户端。
 ///
@@ -44,16 +45,9 @@ class ApiClient {
       responseType: ResponseType.plain,
       validateStatus: (_) => true,
     ));
+    // 证书校验策略（含 TOFU 指纹固定）统一在 panel_http_client.dart 实现。
     _dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 15);
-        if (server.allowSelfSigned) {
-          // 用户在服务器配置中显式允许自签名证书时放行。
-          client.badCertificateCallback = (cert, host, port) => true;
-        }
-        return client;
-      },
+      createHttpClient: () => createPanelHttpClient(server),
     );
   }
 
@@ -132,6 +126,9 @@ class ApiClient {
         ),
       );
     } on DioException catch (e) {
+      // TOFU：证书待确认 / 指纹不匹配时抛出可识别的证书异常。
+      final certError = takeCertificateRejection(server, e);
+      if (certError != null) throw certError;
       throw ApiException(_friendlyDioError(e));
     }
 

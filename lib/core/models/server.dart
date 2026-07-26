@@ -10,7 +10,9 @@ import 'dart:math';
 ///   HMAC 令牌用于 `/api/ws/*`，WS 只能走会话 Cookie 认证，
 ///   详见 core/api/ws_client.dart 顶部注释。未填写时 WS 功能不可用。
 /// - [entrance]：面板「访问入口」路径（如 `/my-entrance`），未设置入口时留空。
-/// - [allowSelfSigned]：允许自签名 / 无效 HTTPS 证书。
+/// - [allowSelfSigned]：允许自签名 / 无效 HTTPS 证书（TOFU：首次连接需用户
+///   确认证书指纹，之后固定校验，见 core/api/panel_http_client.dart）。
+/// - [pinnedCertSha256]：已信任的证书 SHA-256 指纹。
 class ServerConfig {
   const ServerConfig({
     required this.id,
@@ -22,6 +24,7 @@ class ServerConfig {
     this.username = '',
     this.password = '',
     this.entrance = '',
+    this.pinnedCertSha256 = '',
   });
 
   /// 唯一 id（uuid 形式），新建时用 [ServerConfig.newId] 生成。
@@ -50,6 +53,14 @@ class ServerConfig {
 
   /// 面板访问入口路径（如 `/entrance`），未设置时为空字符串。
   final String entrance;
+
+  /// 已信任的服务器证书 SHA-256 指纹（DER 的 SHA-256，小写十六进制）。
+  ///
+  /// 仅在 [allowSelfSigned] 开启时使用：空串表示尚未信任任何证书，
+  /// 首次连接会要求用户核对并信任（TOFU）；非空时只接受指纹一致的证书。
+  /// 旧版本保存的配置没有此字段，反序列化时按空串处理（向后兼容）。
+  /// 校验逻辑见 core/api/panel_http_client.dart。
+  final String pinnedCertSha256;
 
   /// 去掉末尾斜杠的 baseUrl。
   String get normalizedBaseUrl {
@@ -84,6 +95,7 @@ class ServerConfig {
     String? username,
     String? password,
     String? entrance,
+    String? pinnedCertSha256,
   }) {
     return ServerConfig(
       id: id ?? this.id,
@@ -95,6 +107,7 @@ class ServerConfig {
       username: username ?? this.username,
       password: password ?? this.password,
       entrance: entrance ?? this.entrance,
+      pinnedCertSha256: pinnedCertSha256 ?? this.pinnedCertSha256,
     );
   }
 
@@ -109,6 +122,9 @@ class ServerConfig {
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
       entrance: json['entrance'] as String? ?? '',
+      // 旧数据没有该字段：按空串处理，绝不能抛异常（server_store.dart
+      // 反序列化失败时会静默清空全部配置）。
+      pinnedCertSha256: json['pinned_cert_sha256'] as String? ?? '',
     );
   }
 
@@ -123,6 +139,7 @@ class ServerConfig {
       'username': username,
       'password': password,
       'entrance': entrance,
+      'pinned_cert_sha256': pinnedCertSha256,
     };
   }
 
@@ -150,11 +167,12 @@ class ServerConfig {
           other.allowSelfSigned == allowSelfSigned &&
           other.username == username &&
           other.password == password &&
-          other.entrance == entrance;
+          other.entrance == entrance &&
+          other.pinnedCertSha256 == pinnedCertSha256;
 
   @override
   int get hashCode => Object.hash(id, name, baseUrl, tokenId, token,
-      allowSelfSigned, username, password, entrance);
+      allowSelfSigned, username, password, entrance, pinnedCertSha256);
 
   @override
   String toString() => 'ServerConfig($name, $baseUrl)';

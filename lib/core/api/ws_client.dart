@@ -8,6 +8,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/server.dart';
+import 'panel_http_client.dart';
 
 /// WebSocket 连接（终端 / SSH / 日志跟踪 / 证书签发进度等）。
 ///
@@ -60,17 +61,36 @@ Future<WebSocketChannel> wsConnect(
 
   HttpClient? customClient;
   if (server.allowSelfSigned) {
-    customClient = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true);
+    // 统一工厂：TOFU 指纹校验，见 panel_http_client.dart。
+    customClient = createPanelHttpClient(server);
   }
 
-  return IOWebSocketChannel.connect(
+  final channel = IOWebSocketChannel.connect(
     uri,
     headers: {HttpHeaders.cookieHeader: cookie},
     pingInterval: const Duration(seconds: 30),
     connectTimeout: const Duration(seconds: 15),
     customClient: customClient,
   );
+  try {
+    await channel.ready;
+  } catch (e) {
+    // 握手因证书被拒时给出可识别的证书异常（引导去服务器设置完成确认）；
+    // 其余错误原样抛出，由各页面自行处理。
+    final certError = takeCertificateRejection(server, _unwrapChannelError(e));
+    if (certError != null) throw certError;
+    rethrow;
+  }
+  return channel;
+}
+
+/// 逐层解开 [WebSocketChannelException] 的 inner，取出底层异常。
+Object _unwrapChannelError(Object error) {
+  var e = error;
+  while (e is WebSocketChannelException && e.inner != null) {
+    e = e.inner!;
+  }
+  return e;
 }
 
 /// WebSocket 会话认证失败（未配置账号 / 密码错误 / 需要 2FA 或验证码等）。
@@ -220,7 +240,7 @@ class WsSessionManager {
   }
 
   Future<bool> _isLoggedIn(ServerConfig server, _WsSession session) async {
-    final client = _newHttpClient(server);
+    final client = createPanelHttpClient(server);
     try {
       // 会话已带 verify_entrance 标记，直接访问 /api/*（不带入口前缀——
       // 入口前缀路径仅在携带 Authorization 头时才会被重写，见 entrance.go 情况三）。
@@ -250,7 +270,7 @@ class WsSessionManager {
           '未配置面板用户名/密码，无法使用终端等实时功能。请在服务器设置中补充面板账号');
     }
 
-    final client = _newHttpClient(server);
+    final client = createPanelHttpClient(server);
     final cookies = <String, String>{};
     final base = server.normalizedBaseUrl;
     try {
@@ -355,7 +375,11 @@ class WsSessionManager {
       }
     } on WsAuthException {
       rethrow;
-    } on HandshakeException {
+    } on HandshakeException catch (e) {
+      // TOFU：证书待确认 / 指纹不匹配时抛出可识别的证书异常
+      //（toString() 即可读文案，页面通用错误展示可直接使用）。
+      final certError = takeCertificateRejection(server, e);
+      if (certError != null) throw certError;
       throw const WsAuthException(
           '服务器证书校验失败，可在服务器配置中开启「允许自签名证书」');
     } on SocketException {
@@ -476,15 +500,6 @@ class WsSessionManager {
       }
     } catch (_) {}
     return null;
-  }
-
-  static HttpClient _newHttpClient(ServerConfig server) {
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 15);
-    if (server.allowSelfSigned) {
-      client.badCertificateCallback = (cert, host, port) => true;
-    }
-    return client;
   }
 
   static void _mergeCookies(Map<String, String> jar, List<Cookie> setCookies) {

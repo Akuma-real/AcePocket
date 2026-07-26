@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/panel_http_client.dart';
+import '../../../core/storage/server_store.dart';
 import '../providers/servers_providers.dart';
+import 'certificate_trust_dialog.dart';
 import 'connection_test_result_card.dart';
 
 /// 对已保存的服务器执行连接测试，并以对话框展示结果。
@@ -30,10 +33,27 @@ class _ConnectionTestDialog extends ConsumerWidget {
   final String serverId;
   final String serverName;
 
+  /// TOFU：用户核对并信任证书后，把指纹写入已保存的配置并重新测试。
+  Future<void> _trustCertificate(
+    BuildContext context,
+    WidgetRef ref,
+    CertificateTrustRequiredException error,
+  ) async {
+    final trusted = await showCertificateTrustDialog(context, error.certificate);
+    if (!trusted || !context.mounted) return;
+    final server = ref.read(serverByIdProvider(serverId));
+    if (server == null) return;
+    await ref.read(serverListProvider.notifier).updateServer(
+          server.copyWith(pinnedCertSha256: error.certificate.sha256Hex),
+        );
+    ref.invalidate(serverConnectionTestProvider(serverId));
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final testAsync = ref.watch(serverConnectionTestProvider(serverId));
+    final error = testAsync.hasError ? testAsync.error : null;
 
     return AlertDialog(
       title: Text('测试「$serverName」'),
@@ -67,6 +87,11 @@ class _ConnectionTestDialog extends ConsumerWidget {
         ),
       ),
       actions: [
+        if (!testAsync.isLoading && error is CertificateTrustRequiredException)
+          TextButton(
+            onPressed: () => _trustCertificate(context, ref, error),
+            child: const Text('查看并信任证书'),
+          ),
         if (!testAsync.isLoading)
           TextButton(
             onPressed: () =>

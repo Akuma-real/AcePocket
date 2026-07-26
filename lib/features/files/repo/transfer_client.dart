@@ -11,6 +11,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/api/panel_http_client.dart';
 import '../../../core/models/server.dart';
 
 /// 传输进度回调。
@@ -75,15 +76,9 @@ class PanelTransferClient {
       receiveTimeout: const Duration(minutes: 30),
       validateStatus: (_) => true,
     ));
+    // 证书校验策略（含 TOFU 指纹固定）统一在 panel_http_client.dart 实现。
     _dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 15);
-        if (server.allowSelfSigned) {
-          client.badCertificateCallback = (cert, host, port) => true;
-        }
-        return client;
-      },
+      createHttpClient: () => createPanelHttpClient(server),
     );
   }
 
@@ -362,10 +357,14 @@ class PanelTransferClient {
     return fallback;
   }
 
-  static Object _translate(DioException e, TransferCancelToken? token) {
+  Object _translate(DioException e, TransferCancelToken? token) {
     if (e.type == DioExceptionType.cancel || (token?.isCancelled ?? false)) {
       return const TransferCancelledException();
     }
+    // TOFU：证书待确认 / 指纹不匹配时抛出可识别的证书异常
+    //（toString() 即「请先在服务器设置中完成证书确认」类可读文案）。
+    final certError = takeCertificateRejection(server, e);
+    if (certError != null) return certError;
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:

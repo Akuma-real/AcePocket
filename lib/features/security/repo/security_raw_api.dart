@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -8,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
 import '../../../core/api/api_exception.dart';
+import '../../../core/api/panel_http_client.dart';
 import '../../../core/models/server.dart';
 
 /// 非 JSON 通道的签名请求客户端（防火墙规则导出 / 导入专用）。
@@ -31,15 +31,9 @@ class SecurityRawApi {
       receiveTimeout: const Duration(minutes: 5),
       validateStatus: (_) => true,
     ));
+    // 证书校验策略（含 TOFU 指纹固定）统一在 panel_http_client.dart 实现。
     _dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 15);
-        if (server.allowSelfSigned) {
-          client.badCertificateCallback = (cert, host, port) => true;
-        }
-        return client;
-      },
+      createHttpClient: () => createPanelHttpClient(server),
     );
   }
 
@@ -152,7 +146,9 @@ class SecurityRawApi {
         ),
       );
     } on DioException catch (e) {
-      throw ApiException(_friendlyDioError(e));
+      // TOFU：证书待确认 / 指纹不匹配时抛出可识别的证书异常。
+      throw takeCertificateRejection(server, e) ??
+          ApiException(_friendlyDioError(e));
     }
   }
 
