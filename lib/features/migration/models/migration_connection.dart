@@ -1,3 +1,5 @@
+import '../../../core/utils/url_validation.dart';
+
 /// 远程（目标）面板连接信息（`request.ToolboxMigrationConnection`）。
 ///
 /// 迁移方向：**当前服务器 → 远程服务器**，即把本机面板的网站 / 数据库 /
@@ -18,7 +20,10 @@ class MigrationConnection {
   /// 远程面板 API 令牌。
   final String token;
 
-  bool get isValid => url.trim().isNotEmpty && tokenId > 0 && token.isNotEmpty;
+  /// 连接信息是否可用于发起预检：地址通过 [validatePanelBaseUrl] 校验，
+  /// 且令牌 ID / 令牌已填写。
+  bool get isValid =>
+      validatePanelBaseUrl(url) == null && tokenId > 0 && token.isNotEmpty;
 
   MigrationConnection copyWith({
     String? url,

@@ -138,15 +138,24 @@ class ApiClient {
     final status = response.statusCode ?? 0;
     final text = response.data is String ? response.data as String : '';
     dynamic decoded;
+    var decodeFailed = false;
     if (text.isNotEmpty) {
       try {
         decoded = jsonDecode(text);
       } catch (_) {
-        decoded = null;
+        // 非 JSON 响应：2xx 时直接报错（否则下游模型解析会抛出英文类型错误），
+        // 非 2xx 时继续走下方的状态码兜底提示。
+        decodeFailed = true;
       }
     }
 
     if (status >= 200 && status < 300) {
+      if (decodeFailed) {
+        throw ApiException(
+          '面板响应格式异常，请确认地址指向的是 AcePanel 面板',
+          statusCode: status,
+        );
+      }
       if (decoded is Map<String, dynamic>) return decoded['data'];
       return decoded;
     }
@@ -237,7 +246,62 @@ class ApiClient {
       case DioExceptionType.cancel:
         return '请求已取消';
       default:
-        return e.message ?? '网络请求失败';
+        return _describeUnknownDioError(e);
     }
+  }
+
+  /// `DioExceptionType.unknown` 等无现成文案的错误：
+  /// 根据 [DioException.error] 的实际类型给出可操作的提示。
+  ///
+  /// 典型场景：用户把端口写错导致 https 连到了非 HTTPS 端口，
+  /// Dio 抛 unknown 且 `message` 为 null，若不细分只能显示「网络请求失败」。
+  static String _describeUnknownDioError(DioException e) {
+    final error = e.error;
+
+    if (error is HandshakeException) {
+      final detail = error.toString();
+      if (detail.contains('CERTIFICATE_VERIFY_FAILED') ||
+          detail.contains('certificate')) {
+        return '服务器证书校验失败，可在服务器配置中开启「允许自签名证书」';
+      }
+      // 含 WRONG_VERSION_NUMBER 等：对端多半不是在说 TLS。
+      return 'HTTPS 握手失败：该端口可能不是 HTTPS 服务。'
+          '请确认面板地址的协议与端口是否正确。';
+    }
+    if (error is HttpException) {
+      return '连接被服务器意外关闭，可能是协议不匹配'
+          '（http 填成了 https，或反之），请检查面板地址的协议与端口';
+    }
+    if (error is SocketException) {
+      final detail = error.toString();
+      if (detail.contains('Failed host lookup')) {
+        return '域名解析失败，请检查面板地址中的主机名是否拼写正确，'
+            '以及设备网络是否正常';
+      }
+      if (detail.contains('Connection refused') || error.osError?.errorCode == 111) {
+        return '连接被服务器拒绝：目标端口没有服务在监听。'
+            '请确认面板地址的端口是否正确、面板是否正在运行';
+      }
+      return '无法连接服务器，请检查网络与面板地址（${_briefError(error)}）';
+    }
+    if (error is FormatException) {
+      return '面板返回的不是合法 JSON，可能地址指向的不是 AcePanel 面板，'
+          '请检查面板地址与访问入口';
+    }
+
+    // 兜底：附上原始错误的简短摘要，便于用户排查与反馈。
+    final summary = _briefError(error ?? e.message);
+    return summary.isEmpty
+        ? '网络请求失败，请检查网络连接与面板地址后重试'
+        : '网络请求失败，请检查网络连接与面板地址后重试（$summary）';
+  }
+
+  /// 取错误对象的单行简短摘要，超长时截断。
+  static String _briefError(Object? error) {
+    if (error == null) return '';
+    final text = error.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    const maxLength = 120;
+    if (text.length <= maxLength) return text;
+    return '${text.substring(0, maxLength)}…';
   }
 }

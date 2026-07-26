@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/storage/server_store.dart';
+import '../../../core/utils/url_validation.dart';
 import '../../../core/version/panel_feature.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/error_view.dart';
@@ -220,11 +221,17 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
               controller: _urlController,
               keyboardType: TextInputType.url,
               autocorrect: false,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '面板地址',
                 hintText: 'https://1.2.3.4:8888',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.link),
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.link),
+                // 未输入时不提示错误；输入后实时校验（校验不通过时
+                // 「连接并预检」按钮同样会因 isValid 为 false 而禁用）。
+                errorText: connection.url.trim().isEmpty
+                    ? null
+                    : validatePanelBaseUrl(connection.url),
+                errorMaxLines: 2,
               ),
               onChanged: (value) {
                 _pushedUrl = value;

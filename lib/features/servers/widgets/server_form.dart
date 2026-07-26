@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/server.dart';
+import '../../../core/utils/url_validation.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../models/connection_test.dart';
 import '../providers/servers_providers.dart';
@@ -167,17 +168,7 @@ class _ServerFormState extends ConsumerState<ServerForm> {
     return null;
   }
 
-  String? _validateBaseUrl(String? value) {
-    final v = value?.trim() ?? '';
-    if (v.isEmpty) return '请输入面板地址';
-    final uri = Uri.tryParse(v);
-    if (uri == null ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.host.isEmpty) {
-      return '地址需以 http:// 或 https:// 开头，如 https://1.2.3.4:8888';
-    }
-    return null;
-  }
+  String? _validateBaseUrl(String? value) => validatePanelBaseUrl(value ?? '');
 
   String? _validateTokenId(String? value) {
     final v = value?.trim() ?? '';
