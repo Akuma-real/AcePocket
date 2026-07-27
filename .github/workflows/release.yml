@@ -9,42 +9,106 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的标签（如 v1.0.1），需已存在'
+        description: '要发布的标签（如 v1.0.4），需已存在且尚未发布'
         required: true
 
 permissions:
-  contents: write   # 创建 Release 需要
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # 证书指纹是公开校验值；更换正式签名密钥时必须同步更新。
+  EXPECTED_SIGNING_CERT_SHA256: 8ca36540c217e9f9fdbbd76787706f85922791e9653808da561cc960486e7f0d
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
-          fetch-depth: 0   # 生成变更日志需要历史
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: subosito/flutter-action@v2
+      - name: 校验发布标签
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::标签必须符合 vX.Y.Z 格式，实际为 $RELEASE_TAG。"
+            exit 1
+          fi
+
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "::error::$RELEASE_TAG 不是已存在的 Git 标签。"
+            exit 1
+          fi
+
+          TAG_COMMIT=$(git rev-list -n 1 "$RELEASE_TAG")
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then
+            echo "::error::当前检出的提交与标签 $RELEASE_TAG 不一致。"
+            exit 1
+          fi
+
+          PUBSPEC_VER=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+)(\+.*)?$/\1/p' pubspec.yaml)
+          if [[ -z "$PUBSPEC_VER" || "${RELEASE_TAG#v}" != "$PUBSPEC_VER" ]]; then
+            echo "::error::标签 $RELEASE_TAG 与 pubspec.yaml 的 version (${PUBSPEC_VER:-无法解析}) 不一致。"
+            exit 1
+          fi
+
+          HTTP_STATUS=$(curl --silent --show-error \
+            --output "$RUNNER_TEMP/existing-release.json" \
+            --write-out '%{http_code}' \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")
+          case "$HTTP_STATUS" in
+            200)
+              echo "::error::Release $RELEASE_TAG 已存在；为保证同一版本的 APK 不可变，本工作流拒绝覆盖。"
+              exit 1
+              ;;
+            404) ;;
+            *)
+              echo "::error::检查现有 Release 失败，GitHub API 返回 HTTP $HTTP_STATUS。"
+              exit 1
+              ;;
+          esac
+
+          echo "标签、提交和版本一致：$RELEASE_TAG ($HEAD_COMMIT)"
+
+      - name: 生成变更日志
+        run: |
+          PREV=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 "$RELEASE_TAG^" 2>/dev/null || true)
+          {
+            if [[ -n "$PREV" ]]; then
+              echo "## 自 $PREV 以来的变更"
+              echo
+              git log --no-merges --pretty='- %s' "$PREV..$RELEASE_TAG"
+            else
+              echo '## 首个发布版本'
+            fi
+            echo
+            echo '---'
+            echo 'arm64-v8a 适用于绝大多数设备；不确定时下载 `app-release.apk`（通用包，体积较大）。'
+          } > release-notes.md
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.44.8'
           channel: stable
           cache: true
 
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
 
-      - name: 校验标签与 pubspec 版本一致
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          PUBSPEC_VER=$(grep -E '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
-          if [ "${TAG#v}" != "$PUBSPEC_VER" ]; then
-            echo "::error::标签 $TAG 与 pubspec.yaml 的 version ($PUBSPEC_VER) 不一致。"
-            echo "App 内更新按版本号比较，二者不一致会导致更新提示错乱。"
-            exit 1
-          fi
-          echo "版本一致：$PUBSPEC_VER"
-
-      - run: flutter analyze
-      - run: flutter test
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
 
       - name: 还原签名配置
         env:
@@ -53,13 +117,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "::error::缺少 ANDROID_KEYSTORE_BASE64，无法产出可分发的包。"
+          MISSING=()
+          [[ -n "$KEYSTORE_B64" ]] || MISSING+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "$STORE_PASSWORD" ]] || MISSING+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "$KEY_PASSWORD" ]] || MISSING+=(ANDROID_KEY_PASSWORD)
+          [[ -n "$KEY_ALIAS" ]] || MISSING+=(ANDROID_KEY_ALIAS)
+          if (( ${#MISSING[@]} > 0 )); then
+            echo "::error::缺少 Android 发布签名 Secret：${MISSING[*]}。"
             exit 1
           fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          # key.properties 由 android/app/build.gradle.kts 读取；写在 android/ 下，
-          # 该文件已被 .gitignore 排除，不会污染工作区。
+
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           {
             echo "storeFile=$RUNNER_TEMP/release.jks"
             echo "storePassword=$STORE_PASSWORD"
@@ -67,56 +135,97 @@ jobs:
             echo "keyPassword=$KEY_PASSWORD"
           } > android/key.properties
 
-      # 分架构出包体积更小；同时出一个通用包便于手动安装。
       - name: 构建 APK
         run: |
-          flutter build apk --release --split-per-abi
-          flutter build apk --release
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --no-pub
+          flutter build apk --release --no-pub
 
-      - name: 校验产物确为正式密钥签名
+      - name: 校验所有发布 APK 的签名
         run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
-          OUT=build/app/outputs/flutter-apk/app-release.apk
-          "$APKSIGNER" verify --print-certs "$OUT" | tee /tmp/certs.txt
-          # debug 密钥的固定 DN，出现即说明签名配置没生效
-          if grep -q "CN=Android Debug" /tmp/certs.txt; then
-            echo "::error::产物使用了 debug 密钥签名，签名配置未生效。"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 \
+            -type f -name apksigner -print | sort -V | tail -n 1)
+          if [[ -z "$APKSIGNER" ]]; then
+            echo '::error::未找到 Android SDK apksigner。'
             exit 1
           fi
 
-      - name: 生成变更日志
-        id: changelog
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
-          {
-            echo 'body<<CHANGELOG_EOF'
-            if [ -n "$PREV" ]; then
-              echo "## 自 $PREV 以来的变更"
-              echo
-              git log --no-merges --pretty='- %s' "$PREV..$TAG"
-            else
-              echo "## 首个发布版本"
-            fi
-            echo
-            echo "---"
-            echo "arm64-v8a 适用于绝大多数设备；不确定时下载 \`app-release.apk\`（通用包，体积较大）。"
-            echo 'CHANGELOG_EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: 创建 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
-          body: ${{ steps.changelog.outputs.body }}
-          draft: false        # App 内更新读的是 /releases/latest，draft 不会出现在其中
-          prerelease: false
-          files: |
+          APKS=(
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          )
+          for APK in "${APKS[@]}"; do
+            if [[ ! -f "$APK" ]]; then
+              echo "::error::缺少待发布产物 $APK。"
+              exit 1
+            fi
+
+            CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+            printf '%s\n' "$CERTS"
+            mapfile -t DIGESTS < <(printf '%s\n' "$CERTS" | sed -n \
+              's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p')
+            if (( ${#DIGESTS[@]} != 1 )); then
+              echo "::error::$APK 的签名者数量不是 1。"
+              exit 1
+            fi
+            if [[ "${DIGESTS[0],,}" != "$EXPECTED_SIGNING_CERT_SHA256" ]]; then
+              echo "::error::$APK 的签名证书指纹不是预期的正式证书。"
+              exit 1
+            fi
+          done
 
       - name: 清理签名材料
         if: always()
         run: rm -f android/key.properties "$RUNNER_TEMP/release.jks"
+
+      - name: 整理发布产物
+        run: |
+          mkdir -p release-dist
+          cp build/app/outputs/flutter-apk/app-release.apk release-dist/
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-dist/
+          cp release-notes.md release-dist/
+
+      - name: 暂存发布产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ env.RELEASE_TAG }}
+          path: release-dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: 下载发布产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-${{ env.RELEASE_TAG }}
+          path: release-dist
+
+      - name: 核对发布产物
+        run: |
+          for FILE in \
+            release-dist/app-release.apk \
+            release-dist/app-arm64-v8a-release.apk \
+            release-dist/release-notes.md; do
+            if [[ ! -f "$FILE" ]]; then
+              echo "::error::缺少发布文件 $FILE。"
+              exit 1
+            fi
+          done
+
+      - name: 创建不可覆盖的 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            release-dist/app-release.apk \
+            release-dist/app-arm64-v8a-release.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-dist/release-notes.md \
+            --verify-tag
