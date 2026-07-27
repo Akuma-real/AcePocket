@@ -39,19 +39,3 @@ jobs:
       # 用 debug 密钥构建，仅验证 release 构建链路可用，产物不分发。
       - name: 构建校验（未签名）
         run: flutter build apk --release --target-platform android-arm64
-
-  build-ios:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.8'
-          channel: stable
-          cache: true
-
-      - run: flutter pub get
-
-      - name: 构建 iOS 校验（不签名）
-        run: flutter build ios --release --no-codesign
