@@ -304,6 +304,11 @@ flutter build ipa                  # iOS（需 macOS + 签名配置）
   两者叠加会让 file_picker 的 Kotlin 源码不参与编译，构建时报
   `找不到符号: 类 FilePickerPlugin`。仓库已在 `android/build.gradle.kts` 末尾针对该子工程
   补回 Kotlin 插件与 JVM 17 目标，**重新生成 android/ 后需要手动补回这段**。
+- **Flutter 内建 Kotlin 迁移警告**：Flutter 3.44 构建时仍会提示 `file_picker` 11.0.2
+  与 `package_info_plus` 9.0.1 自行应用 KGP，未来 Flutter 版本会停止兼容。当前
+  `file_picker` 已是稳定最新版，而 `package_info_plus` 10.x 依赖 `win32` 6.x，和
+  `file_picker` 11.0.2 依赖的 `win32` 5.x 无法同时解析；需等待上游发布可兼容版本后
+  一并升级。在此之前当前 Flutter 3.44.8 的 release 构建可正常完成。
 - **`flutter create .` 之后如果 `pubspec.yaml` 被改写**（某些 Flutter 版本会追加默认段落），
   请确认 `name: acepanel_mobile`、`environment.sdk: ^3.5.0` 与 dependencies 列表仍与仓库版本一致。
 - **`intl` 版本**：`flutter_localizations` 会把 `intl` 钉死在 Flutter SDK 内置的版本上。
@@ -316,10 +321,8 @@ flutter build ipa                  # iOS（需 macOS + 签名配置）
   执行 `flutter create .` 后若该文件被覆盖，需要重新加回：
   `<uses-permission android:name="android.permission.INTERNET"/>`。
   验证方法：`adb shell dumpsys package <包名> | grep INTERNET`。
-  若面板是 **HTTP（非 HTTPS）** 地址，Android 9+ 默认禁止明文流量，需要在
-  `android/app/src/main/AndroidManifest.xml` 的 `<application>` 上加 `android:usesCleartextTraffic="true"`
-  （或配置 `network_security_config`）；iOS 则需要在 `Info.plist` 配置 ATS 例外。
-  **强烈建议直接给面板配 HTTPS**。
+  App 仅接受 **HTTPS** 面板地址；Android 明文流量限制和 iOS ATS 均不会为
+  HTTP 面板放宽。请先给面板配置 HTTPS，再添加服务器。
 - **自签名证书**：在「添加服务器」的高级选项中打开「允许自签名证书」即可（App 内实现，不需要改平台配置）。
 
 ---

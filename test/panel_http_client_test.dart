@@ -6,6 +6,29 @@ import 'package:acepocket/core/api/panel_http_client.dart';
 import 'package:acepocket/core/models/server.dart';
 
 void main() {
+  group('ensureSecurePanelTransport', () {
+    const secure = ServerConfig(
+      id: 'secure',
+      name: 'secure',
+      baseUrl: 'https://panel.example.com',
+      tokenId: '1',
+      token: 'token',
+    );
+
+    test('允许 HTTPS', () {
+      expect(() => ensureSecurePanelTransport(secure), returnsNormally);
+    });
+
+    test('拒绝旧配置中的 HTTP 地址', () {
+      expect(
+        () => ensureSecurePanelTransport(
+          secure.copyWith(baseUrl: 'http://panel.example.com'),
+        ),
+        throwsA(predicate((error) => error.toString().contains('必须使用 HTTPS'))),
+      );
+    });
+  });
+
   group('certificateSha256Hex', () {
     test('对固定字节输出小写十六进制 SHA-256（NIST 公开向量 "abc"）', () {
       expect(

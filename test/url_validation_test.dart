@@ -6,11 +6,21 @@ void main() {
   group('validatePanelBaseUrl', () {
     test('正确地址通过校验', () {
       expect(validatePanelBaseUrl('https://1.2.3.4:8888'), isNull);
-      expect(validatePanelBaseUrl('http://panel.example.com'), isNull);
       expect(validatePanelBaseUrl('https://panel.example.com:13140'), isNull);
       // 前后空白与尾部斜杠（由 normalizedBaseUrl 去除）不应报错。
       expect(validatePanelBaseUrl('  https://panel.example.com:13140  '), isNull);
       expect(validatePanelBaseUrl('https://panel.example.com:13140/'), isNull);
+    });
+
+    test('HTTP 明文地址被拒绝并明确要求 HTTPS', () {
+      expect(
+        validatePanelBaseUrl('http://panel.example.com'),
+        contains('必须使用 HTTPS'),
+      );
+      expect(
+        validatePanelBaseUrl('http://[fe80::1]:8080'),
+        contains('必须使用 HTTPS'),
+      );
     });
 
     test('空输入被拒绝', () {
@@ -72,18 +82,18 @@ void main() {
       );
     });
 
-    test('缺 scheme 或 scheme 非 http/https 被拒绝', () {
+    test('缺 scheme 或 scheme 非 https 被拒绝', () {
       expect(
         validatePanelBaseUrl('panel.example.com:8888'),
-        contains('http:// 或 https://'),
+        contains('https://'),
       );
       expect(
         validatePanelBaseUrl('1.2.3.4:8888'),
-        contains('http:// 或 https://'),
+        contains('https://'),
       );
       expect(
         validatePanelBaseUrl('ftp://1.2.3.4:8888'),
-        contains('http:// 或 https://'),
+        contains('https://'),
       );
     });
 
@@ -103,7 +113,6 @@ void main() {
 
     test('IPv6 地址通过校验', () {
       expect(validatePanelBaseUrl('https://[::1]:8888'), isNull);
-      expect(validatePanelBaseUrl('http://[fe80::1]:8080'), isNull);
       // IPv6 同样适用路径 / 端口校验。
       expect(
         validatePanelBaseUrl('https://[::1]/8888'),

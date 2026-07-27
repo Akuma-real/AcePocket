@@ -9,7 +9,7 @@ library;
 /// 返回 null 表示通过，否则返回面向用户的中文错误文案。
 ///
 /// 规则：
-/// - scheme 必须为 http / https，host 非空；
+/// - scheme 必须为 https，host 非空；
 /// - 不允许 userinfo（`user:pass@`）、query（`?`）、fragment（`#`）；
 /// - 不允许路径：`/13140` 这类纯数字段提示端口应使用冒号，
 ///   `/api` 前缀提示由 App 自动添加，其余路径提示填到「访问入口」；
@@ -20,10 +20,11 @@ String? validatePanelBaseUrl(String input) {
   if (v.isEmpty) return '请输入面板地址';
 
   final uri = Uri.tryParse(v);
-  if (uri == null ||
-      (uri.scheme != 'http' && uri.scheme != 'https') ||
-      uri.host.isEmpty) {
-    return '地址需以 http:// 或 https:// 开头，如 https://1.2.3.4:8888';
+  if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+    if (uri?.scheme == 'http' && uri?.host.isNotEmpty == true) {
+      return '出于安全原因，面板地址必须使用 HTTPS，请先为面板配置 HTTPS';
+    }
+    return '地址需以 https:// 开头，如 https://1.2.3.4:8888';
   }
   if (uri.userInfo.isNotEmpty) {
     return '地址不应包含用户名密码（user:pass@），认证信息请填在对应的令牌字段';

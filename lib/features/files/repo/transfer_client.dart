@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:open_filex/open_filex.dart';
@@ -12,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/panel_http_client.dart';
+import '../../../core/api/panel_request_signer.dart';
 import '../../../core/models/server.dart';
 
 /// 传输进度回调。
@@ -111,12 +111,12 @@ class PanelTransferClient {
       fileName: fileName,
       fileBytes: fileBytes,
     );
-    final canonicalQuery = canonicalQueryString(query);
+    final canonicalQuery = canonicalPanelQuery(query);
     final response = await _send<String>(
       method: 'POST',
       apiPath: apiPath,
       canonicalQuery: canonicalQuery,
-      bodyHash: sha256.convert(body).toString(),
+      bodyHash: sha256HexBytes(body),
       data: _progressStream(body, onProgress),
       contentLength: body.length,
       contentType: 'multipart/form-data; boundary=$boundary',
@@ -147,7 +147,7 @@ class PanelTransferClient {
     final response = await _send<ResponseBody>(
       method: 'GET',
       apiPath: apiPath,
-      canonicalQuery: canonicalQueryString(query),
+      canonicalQuery: canonicalPanelQuery(query),
       bodyHash: _emptyBodyHash,
       responseType: ResponseType.stream,
       cancelToken: cancelToken,
@@ -251,8 +251,7 @@ class PanelTransferClient {
   // 内部实现
   // ---------------------------------------------------------------------------
 
-  static final String _emptyBodyHash =
-      sha256.convert(const <int>[]).toString();
+  static final String _emptyBodyHash = sha256HexBytes(const <int>[]);
 
   Future<Response<T>> _send<T>({
     required String method,
@@ -265,16 +264,19 @@ class PanelTransferClient {
     String? contentType,
     TransferCancelToken? cancelToken,
   }) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final canonicalRequest = '$method\n$apiPath\n$canonicalQuery\n$bodyHash';
-    final stringToSign = 'HMAC-SHA256\n$timestamp\n'
-        '${sha256.convert(utf8.encode(canonicalRequest))}';
-    final signature = Hmac(sha256, utf8.encode(server.token))
-        .convert(utf8.encode(stringToSign))
-        .toString();
+    ensureSecurePanelTransport(server);
+    final signed = createPanelRequestSignature(
+      method: method,
+      apiPath: apiPath,
+      canonicalQuery: canonicalQuery,
+      bodyHash: bodyHash,
+      timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      token: server.token,
+    );
 
     // 实际请求路径带访问入口前缀，参与签名的路径不带（入口中间件会重写回 /api/...）。
-    final url = '${server.normalizedBaseUrl}${server.entrancePath}$apiPath'
+    final url =
+        '${server.normalizedBaseUrl}${server.entrancePath}${signed.apiPath}'
         '${canonicalQuery.isEmpty ? '' : '?$canonicalQuery'}';
 
     try {
@@ -283,12 +285,11 @@ class PanelTransferClient {
         data: data,
         cancelToken: cancelToken?.raw,
         options: Options(
-          method: method,
+          method: signed.method,
           responseType: responseType,
           headers: {
-            'Authorization':
-                'HMAC-SHA256 Credential=${server.tokenId}, Signature=$signature',
-            'X-Timestamp': '$timestamp',
+            'Authorization': signed.authorizationHeader(server.tokenId),
+            'X-Timestamp': '${signed.timestamp}',
             if (contentLength != null)
               Headers.contentLengthHeader: contentLength,
             if (contentType != null) Headers.contentTypeHeader: contentType,
@@ -417,52 +418,6 @@ class PanelTransferClient {
     builder.add(fileBytes);
     writeText('\r\n--$boundary--\r\n');
     return builder.toBytes();
-  }
-
-  /// 与 Go `url.Values.Encode()` 一致的 query 规范化（键按字典序、QueryEscape）。
-  static String canonicalQueryString(Map<String, dynamic>? query) {
-    if (query == null || query.isEmpty) return '';
-    final keys = query.keys.where((k) => query[k] != null).toList()..sort();
-    final parts = <String>[];
-    for (final key in keys) {
-      final value = query[key];
-      if (value is Iterable) {
-        for (final v in value) {
-          parts.add('${goQueryEscape(key)}=${goQueryEscape('$v')}');
-        }
-      } else {
-        parts.add('${goQueryEscape(key)}=${goQueryEscape('$value')}');
-      }
-    }
-    return parts.join('&');
-  }
-
-  /// Go `url.QueryEscape` 的 Dart 实现：字母数字与 `-._~` 保留，
-  /// 空格转 `+`，其余字节转 `%XX`（大写十六进制）。
-  static String goQueryEscape(String s) {
-    const hexDigits = '0123456789ABCDEF';
-    final bytes = utf8.encode(s);
-    final sb = StringBuffer();
-    for (final b in bytes) {
-      final isUnreserved = (b >= 0x30 && b <= 0x39) ||
-          (b >= 0x41 && b <= 0x5A) ||
-          (b >= 0x61 && b <= 0x7A) ||
-          b == 0x2D ||
-          b == 0x2E ||
-          b == 0x5F ||
-          b == 0x7E;
-      if (isUnreserved) {
-        sb.writeCharCode(b);
-      } else if (b == 0x20) {
-        sb.write('+');
-      } else {
-        sb
-          ..write('%')
-          ..write(hexDigits[(b >> 4) & 0xF])
-          ..write(hexDigits[b & 0xF]);
-      }
-    }
-    return sb.toString();
   }
 }
 

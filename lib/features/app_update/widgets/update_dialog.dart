@@ -15,7 +15,11 @@ import '../models/app_update_models.dart';
 import '../repo/apk_installer.dart';
 
 /// 弹出「发现新版本」对话框。调用方自行决定是否弹（跳过版本的判断在调用方）。
-Future<void> showAppUpdateDialog(BuildContext context, AppRelease release) async {
+Future<void> showAppUpdateDialog(
+  BuildContext context,
+  AppRelease release,
+) async {
+  if (!supportsInAppUpdate) return;
   final update = await showDialog<bool>(
     context: context,
     builder: (context) => _UpdateInfoDialog(release: release),

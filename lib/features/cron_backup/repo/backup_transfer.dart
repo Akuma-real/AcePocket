@@ -9,6 +9,7 @@ import 'package:dio/io.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/panel_http_client.dart';
+import '../../../core/api/panel_request_signer.dart';
 import '../../../core/models/server.dart';
 import '../../files/repo/transfer_client.dart';
 
@@ -90,6 +91,7 @@ class BackupUploader {
     TransferProgress? onProgress,
     TransferCancelToken? cancelToken,
   }) async {
+    ensureSecurePanelTransport(server);
     cancelToken?.throwIfCancelled();
     if (!await source.exists()) {
       throw const ApiException('本机文件不存在或已被移动');
@@ -193,16 +195,19 @@ class BackupUploader {
     required String contentType,
     TransferCancelToken? cancelToken,
   }) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final canonicalRequest = '$method\n$apiPath\n\n$bodyHash';
-    final stringToSign = 'HMAC-SHA256\n$timestamp\n'
-        '${sha256.convert(utf8.encode(canonicalRequest))}';
-    final signature = Hmac(sha256, utf8.encode(server.token))
-        .convert(utf8.encode(stringToSign))
-        .toString();
+    ensureSecurePanelTransport(server);
+    final signed = createPanelRequestSignature(
+      method: method,
+      apiPath: apiPath,
+      canonicalQuery: '',
+      bodyHash: bodyHash,
+      timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      token: server.token,
+    );
 
     // 实际请求路径带访问入口前缀，参与签名的路径不带（入口中间件会重写回 /api/...）。
-    final url = '${server.normalizedBaseUrl}${server.entrancePath}$apiPath';
+    final url =
+        '${server.normalizedBaseUrl}${server.entrancePath}${signed.apiPath}';
 
     try {
       return await _dio.request<String>(
@@ -210,12 +215,11 @@ class BackupUploader {
         data: data,
         cancelToken: cancelToken?.raw,
         options: Options(
-          method: method,
+          method: signed.method,
           responseType: ResponseType.plain,
           headers: {
-            'Authorization':
-                'HMAC-SHA256 Credential=${server.tokenId}, Signature=$signature',
-            'X-Timestamp': '$timestamp',
+            'Authorization': signed.authorizationHeader(server.tokenId),
+            'X-Timestamp': '${signed.timestamp}',
             Headers.contentLengthHeader: contentLength,
             Headers.contentTypeHeader: contentType,
           },

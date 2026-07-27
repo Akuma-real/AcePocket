@@ -44,6 +44,7 @@ Future<WebSocketChannel> wsConnect(
   String path, {
   Map<String, String>? query,
 }) async {
+  ensureSecurePanelTransport(server);
   final cookie = await WsSessionManager.instance.ensureSession(server);
 
   final base = Uri.parse(server.normalizedBaseUrl);
@@ -208,6 +209,7 @@ class WsSessionManager {
     String? captchaCode,
     bool forceRelogin = false,
   }) async {
+    ensureSecurePanelTransport(server);
     if (forceRelogin) {
       _sessions.remove(server.id);
     } else {

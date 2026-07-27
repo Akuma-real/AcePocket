@@ -4,6 +4,20 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 
 import '../models/server.dart';
+import 'api_exception.dart';
+
+/// 拒绝平台安全策略本就不支持的明文面板连接。
+///
+/// 表单校验负责阻止新增 HTTP 配置；这里是网络层最后一道保护，用于旧版本
+/// 已保存的配置以及未来新增的网络通道。
+void ensureSecurePanelTransport(ServerConfig server) {
+  final uri = Uri.tryParse(server.normalizedBaseUrl);
+  if (uri == null || uri.scheme.toLowerCase() != 'https') {
+    throw const ApiException(
+      '出于安全原因，面板地址必须使用 HTTPS。请先为面板配置 HTTPS，再更新服务器地址',
+    );
+  }
+}
 
 /// 面板 HTTPS 证书的统一校验策略与 [HttpClient] 构造（TOFU：首次信任并固定指纹）。
 ///

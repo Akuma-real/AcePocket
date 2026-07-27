@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/panel_http_client.dart';
+import '../../../core/api/panel_request_signer.dart';
 import '../../../core/models/server.dart';
 
 /// 非 JSON 通道的签名请求客户端（防火墙规则导出 / 导入专用）。
@@ -119,27 +119,26 @@ class SecurityRawApi {
     String? contentType,
     required ResponseType responseType,
   }) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final bodyHash = sha256.convert(body ?? const <int>[]).toString();
-    // 这两个接口都不带 query，规范化 query 为空串。
-    final canonicalRequest = '$method\n$apiPath\n\n$bodyHash';
-    final stringToSign = 'HMAC-SHA256\n$timestamp\n'
-        '${sha256.convert(utf8.encode(canonicalRequest))}';
-    final signature = Hmac(sha256, utf8.encode(server.token))
-        .convert(utf8.encode(stringToSign))
-        .toString();
+    ensureSecurePanelTransport(server);
+    final signed = createPanelRequestSignature(
+      method: method,
+      apiPath: apiPath,
+      canonicalQuery: '',
+      bodyHash: sha256HexBytes(body ?? const <int>[]),
+      timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      token: server.token,
+    );
 
     try {
       return await _dio.request<dynamic>(
-        '${server.normalizedBaseUrl}${server.entrancePath}$apiPath',
+        '${server.normalizedBaseUrl}${server.entrancePath}${signed.apiPath}',
         data: body == null ? null : Stream.fromIterable([body]),
         options: Options(
-          method: method,
+          method: signed.method,
           responseType: responseType,
           headers: {
-            'Authorization':
-                'HMAC-SHA256 Credential=${server.tokenId}, Signature=$signature',
-            'X-Timestamp': '$timestamp',
+            'Authorization': signed.authorizationHeader(server.tokenId),
+            'X-Timestamp': '${signed.timestamp}',
             if (body != null) Headers.contentLengthHeader: body.length,
             if (contentType != null) Headers.contentTypeHeader: contentType,
           },
